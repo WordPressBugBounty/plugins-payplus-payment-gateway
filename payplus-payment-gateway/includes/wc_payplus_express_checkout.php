@@ -43,40 +43,40 @@ class WC_PayPlus_Express_Checkout extends WC_PayPlus
         $WC_PayPlus_Gateway = $this->get_main_payplus_gateway();
         $enableGooglePay = isset($WC_PayPlus_Gateway->enable_google_pay) ? $WC_PayPlus_Gateway->enable_google_pay : false;
         $enableApplePay = isset($WC_PayPlus_Gateway->enable_apple_pay) ? $WC_PayPlus_Gateway->enable_apple_pay : false;
-        if ($this->payplus_chkeck_one_click_visible()) {
+        if ($this->payplus_check_one_click_visible()) {
 ?>
-            <script>
-                function isFacebookApp() {
-                    var ua = navigator.userAgent || navigator.vendor || window.opera;
-                    return (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1);
-                }
+<script>
+function isFacebookApp() {
+    var ua = navigator.userAgent || navigator.vendor || window.opera;
+    return (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1);
+}
 
-                let isGoogleEnable = '<?php echo esc_js($enableGooglePay); ?>';
-                let isAppleEnable = '<?php echo esc_js($enableApplePay); ?>';
-                let isAppleAvailable = window.ApplePaySession && ApplePaySession?.canMakePayments();
-                let removeGooglePay = isFacebookApp();
-                let showExpress = (isGoogleEnable == 1 && !removeGooglePay) || (isAppleEnable && isAppleAvailable);
-                let expresscheckouts = document.querySelectorAll(".express-checkout");
-                if (!showExpress) {
-                    expresscheckouts.forEach(e => e.remove());
-                } else {
-                    if (expresscheckouts.length > 1) {
-                        expresscheckouts.forEach((element, index) => {
-                            if (index) {
-                                expresscheckouts[index].remove();
-                            }
-                        });
-                    }
-                }
-                if (removeGooglePay) {
-                    let googlePayButton = document.getElementById('googlePayButton');
-                    if (googlePayButton) {
-                        googlePayButton.remove();
-                    }
+let isGoogleEnable = '<?php echo esc_js($enableGooglePay); ?>';
+let isAppleEnable = '<?php echo esc_js($enableApplePay); ?>';
+let isAppleAvailable = window.ApplePaySession && ApplePaySession?.canMakePayments();
+let removeGooglePay = isFacebookApp();
+let showExpress = (isGoogleEnable == 1 && !removeGooglePay) || (isAppleEnable && isAppleAvailable);
+let expresscheckouts = document.querySelectorAll(".express-checkout");
+if (!showExpress) {
+    expresscheckouts.forEach(e => e.remove());
+} else {
+    if (expresscheckouts.length > 1) {
+        expresscheckouts.forEach((element, index) => {
+            if (index) {
+                expresscheckouts[index].remove();
+            }
+        });
+    }
+}
+if (removeGooglePay) {
+    let googlePayButton = document.getElementById('googlePayButton');
+    if (googlePayButton) {
+        googlePayButton.remove();
+    }
 
-                }
-            </script>
-        <?php
+}
+</script>
+<?php
         }
     }
 
@@ -628,16 +628,25 @@ class WC_PayPlus_Express_Checkout extends WC_PayPlus
      * @param bool $visible
      * @return bool
      */
-    public function payplus_chkeck_one_click_visible($visible = false)
+    public function payplus_check_one_click_visible($visible = false)
     {
         $WC_PayPlus_Gateway = $this->get_main_payplus_gateway();
         $isCheckout = is_cart() || is_checkout() || $visible;
         $isProduct = is_product() && $this->payplus_check_product_isnot_one_click();
+        $isSubscriptionOrder = false;
+        if ($isCheckout || $isProduct) {
+            foreach (WC()->cart->get_cart() as $cart_item) {
+                if (get_class($cart_item['data']) === "WC_Product_Subscription" || get_class($cart_item['data']) === "WC_Product_Subscription_Variation") {
+                    $isSubscriptionOrder = true;
+                    break;
+                }
+            }
+        }
 
         $isGoogleEnable = $WC_PayPlus_Gateway->enable_google_pay;
         $appleAvailable = "<script>document.write(applePayAvailable);</script>";
         $isAppleEnable = $WC_PayPlus_Gateway->enable_apple_pay;
-        $flag = ($isGoogleEnable || ($isAppleEnable && $appleAvailable != 'undefined')) && ($isCheckout || $isProduct);
+        $flag = ($isGoogleEnable || ($isAppleEnable && $appleAvailable != 'undefined')) && ($isCheckout || $isProduct) && !$isSubscriptionOrder;
 
         return $flag;
     }
@@ -650,6 +659,43 @@ class WC_PayPlus_Express_Checkout extends WC_PayPlus
         return $this->payplus_extra_button_on_product_page(true);
     }
 
+
+    public function get_continent_by_country($country_code)
+    {
+        $continent_map = [
+            'Africa' => ['DZ', 'AO', 'BJ', 'BW', 'BF', 'BI', 'CM', 'CV', 'CF', 'TD', 'KM', 'CD', 'DJ', 'EG', 'GQ', 'ER', 'ET', 'GA', 'GM', 'GH', 'GN', 'GW', 'CI', 'KE', 'LS', 'LR', 'LY', 'MG', 'MW', 'ML', 'MR', 'MU', 'YT', 'MA', 'MZ', 'NA', 'NE', 'NG', 'RW', 'ST', 'SN', 'SC', 'SL', 'SO', 'ZA', 'SS', 'SD', 'SZ', 'TZ', 'TG', 'TN', 'UG', 'EH', 'ZM', 'ZW'],
+            'Europe' => ['AL', 'AD', 'AT', 'BY', 'BE', 'BA', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FO', 'FI', 'FR', 'DE', 'GI', 'GR', 'GG', 'VA', 'HU', 'IS', 'IE', 'IM', 'IT', 'JE', 'LV', 'LI', 'LT', 'LU', 'MT', 'MD', 'MC', 'ME', 'NL', 'MK', 'NO', 'PL', 'PT', 'RO', 'RU', 'SM', 'RS', 'SK', 'SI', 'ES', 'SE', 'CH', 'UA', 'GB'],
+            'Asia' => ['AF', 'AM', 'AZ', 'BH', 'BD', 'BT', 'BN', 'KH', 'CN', 'CY', 'GE', 'IN', 'ID', 'IR', 'IQ', 'IL', 'JP', 'JO', 'KZ', 'KW', 'KG', 'LA', 'LB', 'MY', 'MV', 'MN', 'MM', 'NP', 'OM', 'PK', 'PH', 'QA', 'SA', 'SG', 'KR', 'LK', 'SY', 'TW', 'TJ', 'TH', 'TR', 'TM', 'AE', 'UZ', 'VN', 'YE'],
+            'North America' => ['AG', 'BS', 'BB', 'BZ', 'BM', 'VG', 'CA', 'KY', 'CR', 'CU', 'DM', 'DO', 'SV', 'GD', 'GT', 'HT', 'HN', 'JM', 'MX', 'NI', 'PA', 'KN', 'LC', 'VC', 'TT', 'US'],
+            'South America' => ['AR', 'BO', 'BR', 'CL', 'CO', 'EC', 'FK', 'GF', 'GY', 'PY', 'PE', 'SR', 'UY', 'VE'],
+            'Oceania' => ['AS', 'AU', 'CK', 'FJ', 'PF', 'GU', 'KI', 'MH', 'FM', 'NR', 'NC', 'NZ', 'NU', 'NF', 'MP', 'PW', 'PG', 'PN', 'WS', 'SB', 'TK', 'TO', 'TV', 'VU', 'WF'],
+            'Antarctica' => ['AQ']
+        ];
+
+        foreach ($continent_map as $continent => $countries) {
+            if (in_array($country_code, $countries)) {
+                return $continent;
+            }
+        }
+
+        return 'Unknown'; // If the country code doesn't match any continent
+    }
+
+    public function get_continent_full_name($continent_code)
+    {
+        $continent_map = [
+            'AF' => 'Africa',
+            'AS' => 'Asia',
+            'EU' => 'Europe',
+            'NA' => 'North America',
+            'SA' => 'South America',
+            'OC' => 'Oceania',
+            'AN' => 'Antarctica'
+        ];
+
+        return isset($continent_map[$continent_code]) ? $continent_map[$continent_code] : 'Unknown';
+    }
+
     /**
      * @param $visible
      * @return array|string|string[]|void
@@ -660,7 +706,7 @@ class WC_PayPlus_Express_Checkout extends WC_PayPlus
         global $product;
         $WC_PayPlus_Gateway = $this->get_main_payplus_gateway();
 
-        if ($this->payplus_chkeck_one_click_visible($visible)) {
+        if ($this->payplus_check_one_click_visible($visible)) {
 
             $shippingWoo = ($WC_PayPlus_Gateway->shipping_woo) ? "true" : "false";
             $globalShipping = round($WC_PayPlus_Gateway->global_shipping, ROUNDING_DECIMALS);
@@ -668,9 +714,18 @@ class WC_PayPlus_Express_Checkout extends WC_PayPlus
             $globalShippingTaxRate = $WC_PayPlus_Gateway->global_shipping_tax_rate;
             $shippingPrice = $this->get_all_shipping_costs();
             $shipping_zones = WC_Shipping_Zones::get_zones();
-            if ($shippingPrice) {
-                foreach ($shipping_zones as $zone) {
-                    $shipping_methods = $zone['shipping_methods'];
+            $customerCountry = WC()->customer->get_shipping_country();
+            $customerContinent = $this->get_continent_by_country($customerCountry);
+            $continent_shipping_rates = [];
+            $shippingArray = json_decode($shippingPrice, true);
+
+            foreach ($shipping_zones as $zone_data) {
+                $zone = new WC_Shipping_Zone($zone_data['zone_id']); // Initialize zone object
+                $shipping_methods = $zone->get_shipping_methods();
+                // Get the zone locations (countries or regions)
+                $zone_locations = $zone->get_zone_locations();
+
+                if ($shippingPrice) {
                     foreach ($shipping_methods as $id => $shipping_method) {
                         if (isset($shipping_method->requires)) {
                             $condition = $shipping_method->requires;
@@ -685,12 +740,76 @@ class WC_PayPlus_Express_Checkout extends WC_PayPlus
                             }
                         }
                     }
+                    if (isset($shippingPricesArray) && is_array($shippingPricesArray)) {
+                        $shippingPrice = wp_json_encode($shippingPricesArray);
+                    }
                 }
-                if (isset($shippingPricesArray) && is_array($shippingPricesArray)) {
-                    $shippingPrice = wp_json_encode($shippingPricesArray);
+
+                foreach ($zone_locations as $location) {
+                    if ($location->type == 'country') {
+                        $country_code = $location->code;
+                        $continent = $this->get_continent_by_country($country_code);
+
+                        // Get the shipping methods for this zone
+
+
+                        foreach ($shipping_methods as $method) {
+                            $method_id = $method->id;
+                            $method_title = $method->title;
+                            $method_cost = isset($method->cost) ? $method->cost : 'N/A';
+
+                            // Group the shipping rates by continent
+                            if (!isset($continent_shipping_rates[$continent])) {
+                                $continent_shipping_rates[$continent] = [];
+                            }
+
+                            $continent_shipping_rates[$continent][] = [
+                                'zone_name'    => $zone->get_zone_name(),
+                                'method_title' => $method_title,
+                                'method_cost'  => $method_cost,
+                                'country'      => $country_code
+                            ];
+                        }
+                    } else {
+                        if ($location->type == 'continent') {
+                            if (!isset($shippingArray[$customerCountry]) && $customerContinent === $this->get_continent_full_name($location->code)) {
+
+                                foreach ($shipping_methods as $method) {
+                                    $method_id = $method->id;
+                                    $method_title = $method->title;
+                                    $method_cost = isset($method->cost) ? $method->cost : 'N/A';
+
+                                    // Group the shipping rates by continent
+                                    if (!isset($continent_shipping_rates[$customerContinent])) {
+                                        $continent_shipping_rates[$customerContinent] = [];
+                                    }
+
+                                    $continent_shipping_rates[$customerContinent][] = [
+                                        'zone_name'    => $zone->get_zone_name(),
+                                        'method_title' => $method_title,
+                                        'method_cost'  => $method_cost,
+                                        'country'      => $customerCountry
+                                    ];
+                                    $newShippingArray[$customerCountry][0]['id'] = 1;
+                                    $newShippingArray[$customerCountry][0]['title'] = $method_title;
+                                    $newShippingArray[$customerCountry][0]['cost_without_tax'] = $method_cost;
+                                    $newShippingArray[$customerCountry][0]['cost_with_tax'] = $method_cost;
+                                }
+                            }
+                        }
+                    }
                 }
             }
+
             $shippingPrice = ($shippingPrice) ? $shippingPrice : "";
+            if ($shippingPrice !== "") {
+                $shippingsArray = json_decode($shippingPrice, true);
+
+                if (isset($newShippingArray) && is_array($newShippingArray) && isset($newShippingArray[$customerCountry]) && !isset($shippingsArray[$customerCountry])) {
+                    $shippingPrice = wp_json_encode(array_merge($shippingsArray, $newShippingArray));
+                }
+            }
+
             $productId = ($product) ? $product->get_id() : "";
             $productName = ($product) ? $product->get_title() : "";
             $disabled = ($product && $product->get_type() === "variable") ? "disabled" : "";
@@ -705,13 +824,13 @@ class WC_PayPlus_Express_Checkout extends WC_PayPlus
             }
 
         ?>
-            <input type="hidden" value="<?php echo esc_attr($priceProductWithTax) ?>" id="payplus_pricewt_product">
-            <input type="hidden" value="<?php echo esc_attr($priceProductWithoutTax) ?>" id="payplus_pricewithouttax_product">
-            <input type="hidden" value="<?php echo esc_attr($productName) ?>" id="payplus_product_name">
-            <input type="hidden" value="<?php echo esc_attr($shippingPrice) ?>" id="payplus_shipping">
-            <input type="hidden" value="<?php echo esc_attr(get_woocommerce_currency()) ?>" id="payplus_currency_code">
-            <input type="hidden" value="<?php echo esc_attr($shippingWoo) ?>" id="payplus_shipping_woo">
-            <?php
+<input type="hidden" value="<?php echo esc_attr($priceProductWithTax) ?>" id="payplus_pricewt_product">
+<input type="hidden" value="<?php echo esc_attr($priceProductWithoutTax) ?>" id="payplus_pricewithouttax_product">
+<input type="hidden" value="<?php echo esc_attr($productName) ?>" id="payplus_product_name">
+<input type="hidden" value="<?php echo esc_attr($shippingPrice) ?>" id="payplus_shipping">
+<input type="hidden" value="<?php echo esc_attr(get_woocommerce_currency()) ?>" id="payplus_currency_code">
+<input type="hidden" value="<?php echo esc_attr($shippingWoo) ?>" id="payplus_shipping_woo">
+<?php
             if ($shippingWoo === "false") {
                 $globalShippingPriceTax = $globalShipping;
                 if ($globalShippingTax == "taxable" && get_option('woocommerce_calc_taxes') == 'yes') {
@@ -721,9 +840,9 @@ class WC_PayPlus_Express_Checkout extends WC_PayPlus
                     $globalShippingPriceTax = ($rate) ? round($globalShippingPriceTax, ROUNDING_DECIMALS) : $globalShipping;
                 }
             ?>
-                <input type="hidden" value="<?php echo esc_attr($globalShipping) ?>" id="payplus_price_shipping">
-                <input type="hidden" value="<?php echo esc_attr($globalShippingPriceTax) ?>" id="payplus_pricewt_shipping">
-                <input type="hidden" value="<?php echo esc_attr($globalShipping) ?>" id="payplus_pricewithouttax_shipping">
+<input type="hidden" value="<?php echo esc_attr($globalShipping) ?>" id="payplus_price_shipping">
+<input type="hidden" value="<?php echo esc_attr($globalShippingPriceTax) ?>" id="payplus_pricewt_shipping">
+<input type="hidden" value="<?php echo esc_attr($globalShipping) ?>" id="payplus_pricewithouttax_shipping">
 <?php
             }
             echo '<div class="express-flex" >';

@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.1.5
+ * Version: 7.1.6
  * Tested up to: 6.6.2
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.1.5');
-define('PAYPLUS_VERSION_DB', 'payplus_3_1');
+define('PAYPLUS_VERSION', '7.1.6');
+define('PAYPLUS_VERSION_DB', 'payplus_3_2');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -31,7 +31,9 @@ class WC_PayPlus
     public $isApplePayGateWayEnabled;
     public $isApplePayExpressEnabled;
     public $invoice_api = null;
+    public $isAutoPPCC;
     private $_wpnonce;
+    public $importApplePayScript;
 
     /**
      * The main PayPlus gateway instance. Use get_main_payplus_gateway() to access it.
@@ -50,6 +52,8 @@ class WC_PayPlus
         $this->applePaySettings = get_option('woocommerce_payplus-payment-gateway-applepay_settings');
         $this->isApplePayGateWayEnabled = boolval(isset($this->applePaySettings['enabled']) && $this->applePaySettings['enabled'] === "yes");
         $this->isApplePayExpressEnabled = boolval(property_exists($this->payplus_payment_gateway_settings, 'enable_apple_pay') && $this->payplus_payment_gateway_settings->enable_apple_pay === 'yes');
+        $this->isAutoPPCC = boolval(property_exists($this->payplus_payment_gateway_settings, 'auto_load_payplus_cc_method') && $this->payplus_payment_gateway_settings->auto_load_payplus_cc_method === 'yes');
+        $this->importApplePayScript = boolval(property_exists($this->payplus_payment_gateway_settings, 'import_applepay_script') && $this->payplus_payment_gateway_settings->import_applepay_script === 'yes');
 
         add_action('admin_init', [$this, 'check_environment']);
         add_action('admin_notices', [$this, 'admin_notices'], 15);
@@ -162,9 +166,10 @@ class WC_PayPlus
      */
     public function ipn_response()
     {
-        if (!wp_verify_nonce(sanitize_key($this->_wpnonce), '_wp_payplus')) {
-            wp_die('Not allowed! - ipn_response');
+        if (!wp_verify_nonce(sanitize_key($this->_wpnonce), '_wp_payplusIpn')) {
+            check_ajax_referer('payload_link', '_wpnonce');
         }
+
         global $wpdb;
         $this->payplus_gateway = $this->get_main_payplus_gateway();
         $REQUEST = $this->payplus_gateway->arr_clean($_REQUEST);
@@ -453,9 +458,9 @@ class WC_PayPlus
     public function init()
     {
 
-        load_plugin_textdomain('payplus-payment-gateway', false, dirname(plugin_basename(__FILE__)) . '/languages');
+        load_plugin_textdomain('payplus-payment-gateway', false, dirname(plugin_basename(__FILE__)) . '/languages/');
         if (class_exists("WooCommerce")) {
-            $this->_wpnonce = wp_create_nonce('_wp_payplus');
+            $this->_wpnonce = wp_create_nonce('_wp_payplusIpn');
             require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-statics.php';
             require_once PAYPLUS_PLUGIN_DIR . '/includes/admin/class-wc-payplus-admin-settings.php';
             require_once PAYPLUS_PLUGIN_DIR . '/includes/wc_payplus_gateway.php';
@@ -536,14 +541,22 @@ class WC_PayPlus
             $customIcons[] = esc_url($icon);
         }
         $isSubscriptionOrder = false;
+
+        if (is_checkout() || is_product()) {
+            if ($this->importApplePayScript) {
+                wp_register_script('applePayScript', 'https://payments.payplus.co.il/statics/applePay/script.js', array('jquery'), PAYPLUS_VERSION, true);
+                wp_enqueue_script('applePayScript');
+            }
+        }
+
         if (is_checkout()) {
             foreach (WC()->cart->get_cart() as $cart_item) {
-                if (get_class($cart_item['data']) === "WC_Product_Subscription") {
+                if (get_class($cart_item['data']) === "WC_Product_Subscription" || get_class($cart_item['data']) === "WC_Product_Subscription_Variation") {
                     $isSubscriptionOrder = true;
                     break;
                 }
             }
-            wp_scripts()->registered['wc-checkout']->src = PAYPLUS_PLUGIN_URL . 'assets/js/checkout.js?ver=' . PAYPLUS_VERSION;
+            wp_scripts()->registered['wc-checkout']->src = PAYPLUS_PLUGIN_URL . 'assets/js/checkout.min.js?ver=' . PAYPLUS_VERSION;
             if ($this->isApplePayGateWayEnabled || $this->isApplePayExpressEnabled) {
                 if (in_array($this->payplus_payment_gateway_settings->display_mode, ['samePageIframe', 'popupIframe', 'iframe'])) {
                     $importAapplepayScript = 'https://payments.payplus.co.il/statics/applePay/script.js?var=' . PAYPLUS_VERSION;
@@ -552,7 +565,7 @@ class WC_PayPlus
             wp_localize_script(
                 'wc-checkout',
                 'payplus_script_checkout',
-                array("payplus_import_applepay_script" => $importAapplepayScript, "payplus_mobile" => $isModbile, "multiPassIcons" => $multipassIcons, "customIcons" => $customIcons, "isSubscriptionOrder" => $isSubscriptionOrder)
+                array("payplus_import_applepay_script" => $importAapplepayScript, "payplus_mobile" => $isModbile, "multiPassIcons" => $multipassIcons, "customIcons" => $customIcons, "isSubscriptionOrder" => $isSubscriptionOrder, "isAutoPPCC" => $this->isAutoPPCC)
             );
         }
         $isElementor = in_array('elementor/elementor.php', apply_filters('active_plugins', get_option('active_plugins')));

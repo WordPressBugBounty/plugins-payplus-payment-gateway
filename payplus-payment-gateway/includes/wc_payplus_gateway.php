@@ -1257,6 +1257,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             if (filter_var($client_ip, FILTER_VALIDATE_IP) === false) {
                 $client_ip = ""; // Handle invalid IP scenario if necessary
             }
+            $this->store_payment_ip();
             $counts = array_count_values($this->get_payment_ips());
             $howMany = isset($counts[$client_ip]) ? $counts[$client_ip] : 0;
             if (in_array($client_ip, $this->get_payment_ips()) && $howMany >= $this->block_ip_transactions_hour) {
@@ -1912,10 +1913,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $this->default_charge_method = 'credit-card';
         }
 
-        $callback = get_site_url(null, '/?wc-api=callback_response&_wpnonce=' . $this->_wpnonce);
-        if ($this->api_test_mode === true && $this->callback_addr) {
-            $callback = $this->callback_addr;
-        }
+        $callback = $this->callback_addr ? $this->callback_addr : get_site_url(null, '/?wc-api=callback_response&_wpnonce=' . $this->_wpnonce);
+
         $post = $this->payplus_get_posts_id("", array("post_parent" => $order_id));
         $external_recurring_payment = "";
         if ($post && $post[0]->post_type === "shop_subscription") {
@@ -2034,12 +2033,15 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->payplus_add_log_all($handle, 'New Payment Process Fired (' . $order_id . ')');
 
         $isSubscriptionOrder = false;
-        foreach (WC()->cart->get_cart() as $cart_item) {
-            if (get_class($cart_item['data']) === "WC_Product_Subscription") {
-                $isSubscriptionOrder = true;
-                break;
+        if (is_checkout()) {
+            foreach (WC()->cart->get_cart() as $cart_item) {
+                if (get_class($cart_item['data']) === "WC_Product_Subscription" || get_class($cart_item['data']) === "WC_Product_Subscription_Variation") {
+                    $isSubscriptionOrder = true;
+                    break;
+                }
             }
         }
+
 
         $options = $isSubscriptionOrder ? ['isSubscriptionOrder' => true] : [];
         $payload = $this->generatePayloadLink($order_id, false, $token, $subscription, $custom_more_info, $move_token, $options);
@@ -2617,7 +2619,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     if ($res->results->status == "error" || $res->results->status == "rejected") {
 
                         $this->payplus_add_log_all($handle, 'Error IPN Error: ' . print_r($res, true), 'error');
-
+                        $this->store_payment_ip();
                         if ($this->failure_order_status !== 'default-woo') {
                             $order->update_status($this->failure_order_status);
                         }
