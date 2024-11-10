@@ -45,38 +45,38 @@ class WC_PayPlus_Express_Checkout extends WC_PayPlus
         $enableApplePay = isset($WC_PayPlus_Gateway->enable_apple_pay) ? $WC_PayPlus_Gateway->enable_apple_pay : false;
         if ($this->payplus_check_one_click_visible()) {
 ?>
-<script>
-function isFacebookApp() {
-    var ua = navigator.userAgent || navigator.vendor || window.opera;
-    return (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1);
-}
+            <script>
+                function isFacebookApp() {
+                    var ua = navigator.userAgent || navigator.vendor || window.opera;
+                    return (ua.indexOf("FBAN") > -1) || (ua.indexOf("FBAV") > -1);
+                }
 
-let isGoogleEnable = '<?php echo esc_js($enableGooglePay); ?>';
-let isAppleEnable = '<?php echo esc_js($enableApplePay); ?>';
-let isAppleAvailable = window.ApplePaySession && ApplePaySession?.canMakePayments();
-let removeGooglePay = isFacebookApp();
-let showExpress = (isGoogleEnable == 1 && !removeGooglePay) || (isAppleEnable && isAppleAvailable);
-let expresscheckouts = document.querySelectorAll(".express-checkout");
-if (!showExpress) {
-    expresscheckouts.forEach(e => e.remove());
-} else {
-    if (expresscheckouts.length > 1) {
-        expresscheckouts.forEach((element, index) => {
-            if (index) {
-                expresscheckouts[index].remove();
-            }
-        });
-    }
-}
-if (removeGooglePay) {
-    let googlePayButton = document.getElementById('googlePayButton');
-    if (googlePayButton) {
-        googlePayButton.remove();
-    }
+                let isGoogleEnable = '<?php echo esc_js($enableGooglePay); ?>';
+                let isAppleEnable = '<?php echo esc_js($enableApplePay); ?>';
+                let isAppleAvailable = window.ApplePaySession && ApplePaySession?.canMakePayments();
+                let removeGooglePay = isFacebookApp();
+                let showExpress = (isGoogleEnable == 1 && !removeGooglePay) || (isAppleEnable && isAppleAvailable);
+                let expresscheckouts = document.querySelectorAll(".express-checkout");
+                if (!showExpress) {
+                    expresscheckouts.forEach(e => e.remove());
+                } else {
+                    if (expresscheckouts.length > 1) {
+                        expresscheckouts.forEach((element, index) => {
+                            if (index) {
+                                expresscheckouts[index].remove();
+                            }
+                        });
+                    }
+                }
+                if (removeGooglePay) {
+                    let googlePayButton = document.getElementById('googlePayButton');
+                    if (googlePayButton) {
+                        googlePayButton.remove();
+                    }
 
-}
-</script>
-<?php
+                }
+            </script>
+        <?php
         }
     }
 
@@ -228,7 +228,7 @@ if (removeGooglePay) {
             $order_id = $order->save();
             $payload = $WC_PayPlus_Gateway->generatePayloadLink($order_id);
             $payload = json_decode($payload, true);
-
+            WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload' => $payload]);
             $arrRemove = array('expiry_datetime', 'hide_other_charge_methods', 'refURL_success', 'refURL_failure', 'refURL_callback', 'charge_default');
             if (count($payload)) {
                 foreach ($payload as $key => $value) {
@@ -724,16 +724,15 @@ if (removeGooglePay) {
                 $shipping_methods = $zone->get_shipping_methods();
                 // Get the zone locations (countries or regions)
                 $zone_locations = $zone->get_zone_locations();
-
                 if ($shippingPrice) {
                     foreach ($shipping_methods as $id => $shipping_method) {
                         if (isset($shipping_method->requires)) {
                             $condition = $shipping_method->requires;
-                            $requiredCondition = $shipping_method->$condition;
+                            $requiredCondition = property_exists($shipping_method, $condition) ? $shipping_method->$condition : false;
                             $shippingPricesArray = json_decode($shippingPrice, true);
                             foreach ($shippingPricesArray as $country => $siPrice) {
                                 foreach ($siPrice as $key => $sp) {
-                                    if ($sp['id'] === $id) {
+                                    if ($sp['id'] === $id && $requiredCondition) {
                                         $shippingPricesArray[$country][$key]['condition'][$condition] = $requiredCondition;
                                     }
                                 }
@@ -745,70 +744,69 @@ if (removeGooglePay) {
                     }
                 }
 
-                foreach ($zone_locations as $location) {
-                    if ($location->type == 'country') {
-                        $country_code = $location->code;
-                        $continent = $this->get_continent_by_country($country_code);
-
-                        // Get the shipping methods for this zone
-
-
-                        foreach ($shipping_methods as $method) {
-                            $method_id = $method->id;
-                            $method_title = $method->title;
-                            $method_cost = isset($method->cost) ? $method->cost : 'N/A';
-
-                            // Group the shipping rates by continent
-                            if (!isset($continent_shipping_rates[$continent])) {
-                                $continent_shipping_rates[$continent] = [];
-                            }
-
-                            $continent_shipping_rates[$continent][] = [
-                                'zone_name'    => $zone->get_zone_name(),
-                                'method_title' => $method_title,
-                                'method_cost'  => $method_cost,
-                                'country'      => $country_code
-                            ];
-                        }
-                    } else {
-                        if ($location->type == 'continent') {
-                            if (!isset($shippingArray[$customerCountry]) && $customerContinent === $this->get_continent_full_name($location->code)) {
-
-                                foreach ($shipping_methods as $method) {
-                                    $method_id = $method->id;
-                                    $method_title = $method->title;
-                                    $method_cost = isset($method->cost) ? $method->cost : 'N/A';
-
-                                    // Group the shipping rates by continent
-                                    if (!isset($continent_shipping_rates[$customerContinent])) {
-                                        $continent_shipping_rates[$customerContinent] = [];
-                                    }
-
-                                    $continent_shipping_rates[$customerContinent][] = [
-                                        'zone_name'    => $zone->get_zone_name(),
-                                        'method_title' => $method_title,
-                                        'method_cost'  => $method_cost,
-                                        'country'      => $customerCountry
-                                    ];
-                                    $newShippingArray[$customerCountry][0]['id'] = 1;
-                                    $newShippingArray[$customerCountry][0]['title'] = $method_title;
-                                    $newShippingArray[$customerCountry][0]['cost_without_tax'] = $method_cost;
-                                    $newShippingArray[$customerCountry][0]['cost_with_tax'] = $method_cost;
-                                }
-                            }
-                        }
-                    }
-                }
+                // foreach ($zone_locations as $k => $location) {
+                //     if ($location->type == 'continent') {
+                //         if (!empty($customerContinent)) {
+                //             foreach ($shipping_methods as $kc => $method) {
+                //                 $method_id = $method->id;
+                //                 $method_title = $method->title;
+                //                 $method_cost = isset($method->cost) ? $method->cost : 0;
+                //                 // Group the shipping rates by continent
+                //                 if (!isset($continent_shipping_rates[$customerContinent])) {
+                //                     $continent_shipping_rates[$customerContinent] = [];
+                //                 }
+                //                 $continent_shipping_rates[$customerContinent][] = [
+                //                     'zone_name'    => $zone->get_zone_name(),
+                //                     'method_title' => $method_title,
+                //                     'method_cost'  => $method_cost,
+                //                     'country'      => $customerCountry
+                //                 ];
+                //                 $newShippingArray[$customerCountry][] = [
+                //                     'id'    => $kc,
+                //                     'title' => $method_title,
+                //                     'cost_without_tax'  => round($method_cost, ROUNDING_DECIMALS),
+                //                     'cost_with_tax'      => round($method_cost, ROUNDING_DECIMALS)
+                //                 ];
+                //                 if (isset($method->requires)) {
+                //                     $condition = $method->requires;
+                //                     $requiredCondition = property_exists($method, $condition) ? $method->$condition : false;
+                //                     foreach ($newShippingArray as $country => $siPrice) {
+                //                         foreach ($siPrice as $nkey => $sp) {
+                //                             if ($sp['id'] === $kc && $requiredCondition) {
+                //                                 $newShippingArray[$customerCountry][$nkey]['condition'][$condition] = $requiredCondition;
+                //                             }
+                //                         }
+                //                     }
+                //                 }
+                //             }
+                //         }
+                //     }
+                // }
             }
 
             $shippingPrice = ($shippingPrice) ? $shippingPrice : "";
-            if ($shippingPrice !== "") {
-                $shippingsArray = json_decode($shippingPrice, true);
+            $shippingPrice = isset($newShippingArray) && is_array($newShippingArray) && !$shippingPrice ? wp_json_encode($newShippingArray) : $shippingPrice;
 
-                if (isset($newShippingArray) && is_array($newShippingArray) && isset($newShippingArray[$customerCountry]) && !isset($shippingsArray[$customerCountry])) {
-                    $shippingPrice = wp_json_encode(array_merge($shippingsArray, $newShippingArray));
+            if (!empty($shippingPrice) || isset($newShippingArray)) {
+                $allShippingArray = json_decode($shippingPrice, true);
+                if (isset($newShippingArray) && is_array($newShippingArray) && isset($newShippingArray[$customerCountry]) && !isset($allShippingArray[$customerCountry]) && is_array($allShippingArray)) {
+                    $allShippingArray = array_merge($allShippingArray, $newShippingArray);
+                }
+                if (isset($allShippingArray) && is_array($allShippingArray)) {
+                    foreach ($allShippingArray as &$innerArray) {
+                        usort($innerArray, function ($a, $b) {
+                            return $a['cost_with_tax'] <=> $b['cost_with_tax'];
+                        });
+                    }
+                    unset($innerArray); // Unset reference to avoid issues
+                    $shippingPrice = wp_json_encode($allShippingArray);
                 }
             }
+            foreach (json_decode($shippingPrice, true) as $country => $entries) {
+                $array[$country] = array_values(array_unique($entries, SORT_REGULAR));
+            }
+
+            $shippingPrice = wp_json_encode($array);
 
             $productId = ($product) ? $product->get_id() : "";
             $productName = ($product) ? $product->get_title() : "";
@@ -824,13 +822,13 @@ if (removeGooglePay) {
             }
 
         ?>
-<input type="hidden" value="<?php echo esc_attr($priceProductWithTax) ?>" id="payplus_pricewt_product">
-<input type="hidden" value="<?php echo esc_attr($priceProductWithoutTax) ?>" id="payplus_pricewithouttax_product">
-<input type="hidden" value="<?php echo esc_attr($productName) ?>" id="payplus_product_name">
-<input type="hidden" value="<?php echo esc_attr($shippingPrice) ?>" id="payplus_shipping">
-<input type="hidden" value="<?php echo esc_attr(get_woocommerce_currency()) ?>" id="payplus_currency_code">
-<input type="hidden" value="<?php echo esc_attr($shippingWoo) ?>" id="payplus_shipping_woo">
-<?php
+            <input type="hidden" value="<?php echo esc_attr($priceProductWithTax) ?>" id="payplus_pricewt_product">
+            <input type="hidden" value="<?php echo esc_attr($priceProductWithoutTax) ?>" id="payplus_pricewithouttax_product">
+            <input type="hidden" value="<?php echo esc_attr($productName) ?>" id="payplus_product_name">
+            <input type="hidden" value="<?php echo esc_attr($shippingPrice) ?>" id="payplus_shipping">
+            <input type="hidden" value="<?php echo esc_attr(get_woocommerce_currency()) ?>" id="payplus_currency_code">
+            <input type="hidden" value="<?php echo esc_attr($shippingWoo) ?>" id="payplus_shipping_woo">
+            <?php
             if ($shippingWoo === "false") {
                 $globalShippingPriceTax = $globalShipping;
                 if ($globalShippingTax == "taxable" && get_option('woocommerce_calc_taxes') == 'yes') {
@@ -840,9 +838,9 @@ if (removeGooglePay) {
                     $globalShippingPriceTax = ($rate) ? round($globalShippingPriceTax, ROUNDING_DECIMALS) : $globalShipping;
                 }
             ?>
-<input type="hidden" value="<?php echo esc_attr($globalShipping) ?>" id="payplus_price_shipping">
-<input type="hidden" value="<?php echo esc_attr($globalShippingPriceTax) ?>" id="payplus_pricewt_shipping">
-<input type="hidden" value="<?php echo esc_attr($globalShipping) ?>" id="payplus_pricewithouttax_shipping">
+                <input type="hidden" value="<?php echo esc_attr($globalShipping) ?>" id="payplus_price_shipping">
+                <input type="hidden" value="<?php echo esc_attr($globalShippingPriceTax) ?>" id="payplus_pricewt_shipping">
+                <input type="hidden" value="<?php echo esc_attr($globalShipping) ?>" id="payplus_pricewithouttax_shipping">
 <?php
             }
             echo '<div class="express-flex" >';

@@ -130,7 +130,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         $token = isset($_POST['token']) ? sanitize_text_field(wp_unslash($_POST['token'])) : null;
 
         $payload = $this->generatePayloadLink($order_id, true, $token);
-
+        WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload' => $payload]);
         $order->set_payment_method('payplus-payment-gateway');
         $order->set_payment_method_title('Pay with Debit or Credit Card');
 
@@ -770,6 +770,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
             $order->set_payment_method_title('Pay with Debit or Credit Card');
             $this->payplus_add_log_all($handle, 'New Payment Process Fired (' . $order_id . ')');
             $payload = $this->generatePayloadLink($order_id, true);
+            WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload' => $payload]);
             $this->payplus_add_log_all($handle, print_r($payload, true), 'payload');
             $response = $this->post_payplus_ws($this->payment_url, $payload);
 
@@ -956,6 +957,10 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
 
     public function payplus_get_section_invoice_not_automatic($orderId, $theTokens)
     {
+
+        if (WC_PayPlus_Meta_Data::get_meta($orderId, 'payplus_status') === "rejected") {
+            return;
+        };
         $this->isInitiated();
         $order = wc_get_order($orderId);
         $selectInvoice = array(
@@ -1669,7 +1674,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                 $rtl = is_rtl() ? 'left' : 'right';
                 // show button only if pageRequestUid is not empty
                 if (!empty($pageRequestUid)) {
-                    echo '<button type="button" data-value="' . esc_attr($order->get_id()) . '" value="' . esc_attr($pageRequestUid) . '" title="' . __('This button triggers an IPN process based on the payment page request UID, retrieving relevant data and updating the order accordingly. If the charge or approval is successful, the order status will automatically update to the default status. Please be aware of this behavior.', 'payplus-payment-gateway') . '" class="button" id="custom-button-get-pp" style="position: absolute;' . esc_attr($rtl) . ': 5px; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Get PayPlus Data</button>';
+                    echo '<button type="button" data-value="' . esc_attr($order->get_id()) . '" value="' . esc_attr($pageRequestUid) . '" title="' . esc_attr(__('This button triggers an IPN process based on the payment page request UID, retrieving relevant data and updating the order accordingly. If the charge or approval is successful, the order status will automatically update to the default status. Please be aware of this behavior.', 'payplus-payment-gateway')) . '" class="button" id="custom-button-get-pp" style="position: absolute;' . esc_attr($rtl) . ': 5px; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Get PayPlus Data</button>';
                     echo "<div class='payplus_loader_gpp'>
                         <div class='loader'>
                           <div class='loader-background'><div class='text'></div></div>

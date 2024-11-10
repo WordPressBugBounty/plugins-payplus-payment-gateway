@@ -2045,7 +2045,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
         $options = $isSubscriptionOrder ? ['isSubscriptionOrder' => true] : [];
         $payload = $this->generatePayloadLink($order_id, false, $token, $subscription, $custom_more_info, $move_token, $options);
-
+        WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload' => $payload]);
         $this->payplus_add_log_all($handle, 'Payload data before Sending to PayPlus');
         $this->payplus_add_log_all($handle, print_r($payload, true), 'payload');
         $response = $this->post_payplus_ws($this->payment_url, $payload);
@@ -2250,23 +2250,20 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $handle = 'payplus_callback_begin';
         $payplusHash = isset($_SERVER['HTTP_HASH']) ? sanitize_text_field($_SERVER['HTTP_HASH']) : ""; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash
 
-        if ($this->callback_addr) {
-            $url = $this->callback_addr;
-            $body = wp_json_encode($json);
-
-            // Set up the request arguments
-            $args = array(
-                'body'        => $body,
-                'headers'     => array('Content-Type' => 'application/json'),
-                'method'      => 'POST',
-                'blocking'    => false, // Allows asynchronous (non-blocking) request
-            );
-
-            // Send the request
-            wp_remote_post($url, $args);
-        }
-
         if ($payplusGenHash === $payplusHash) {
+            if ($this->callback_addr) {
+                $url = $this->callback_addr;
+                // Set up the request arguments
+                $args = array(
+                    'body'        => $json,
+                    'headers'     => array('Content-Type' => 'application/json'),
+                    'method'      => 'POST',
+                    'blocking'    => false, // Allows asynchronous (non-blocking) request
+                );
+
+                // Send the request
+                wp_remote_post($url, $args);
+            }
             $order_id = intval($response['transaction']['more_info']);
             $order = wc_get_order($order_id);
             $orderStatus = $order->get_status();
@@ -2380,7 +2377,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         );
 
         wp_die(
-            json_encode($response),
+            wp_json_encode($response),
             '',
             array(
                 'response' => 200,

@@ -168,7 +168,7 @@ function check_if_page_exists_by_slug($page_slug)
 function payplusGenerateErrorPage()
 {
     $page_slug = 'error-payment-payplus';
-    $errorPageOptions = get_option('settings_payplus_page_error_option');
+    $errorPageOptions = get_option('settings_payplus_page_error_option') ?? false;
     $pageId = check_if_page_exists_by_slug($page_slug);
     if ($pageId) {
         checkPayPlusErrorPage($errorPageOptions);
@@ -179,7 +179,7 @@ function payplusGenerateErrorPage()
         if (!empty($error_page_payplus)) {
             $errorPagePayPlus = get_post($error_page_payplus);
         }
-        if (!$errorPagePayPlus) {
+        if (isset($errorPagePayPlus) && !$errorPagePayPlus) {
             $errorPagePayPlus = wp_insert_post(array(
                 'post_status' => 'publish',
                 'post_type' => 'page',
@@ -199,13 +199,16 @@ function payplusGenerateErrorPage()
  */
 function checkPayPlusErrorPage($errorPageOptions)
 {
-    $error_page_payplus = get_option('error_page_payplus');
-    $errorPagePayPlus = get_post($error_page_payplus);
-    if (strpos($errorPagePayPlus->post_content, "[error-payplus-content]") === 0 || strpos($errorPagePayPlus->post_content, "[error-payplus-content]") > 0) {
-        wp_update_post(array(
-            'ID' => $error_page_payplus,
-            "post_content" => "The transaction has failed, please contact the seller."
-        ));
+    $error_page_payplus = get_option('error_page_payplus') ?? false;
+
+    if($error_page_payplus){
+        $errorPagePayPlus = get_post($error_page_payplus);
+        if ($errorPagePayPlus->post_content !== null && strpos($errorPagePayPlus->post_content, "[error-payplus-content]") === 0 || $errorPagePayPlus->post_content !== null && strpos($errorPagePayPlus->post_content, "[error-payplus-content]") > 0) {
+            wp_update_post(array(
+                'ID' => $error_page_payplus,
+                "post_content" => "The transaction has failed, please contact the seller."
+            ));
+        }
     }
 }
 
