@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.2.5
+ * Version: 7.2.6
  * Tested up to: 6.7
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.2.5');
-define('PAYPLUS_VERSION_DB', 'payplus_3_5');
+define('PAYPLUS_VERSION', '7.2.6');
+define('PAYPLUS_VERSION_DB', 'payplus_3_6');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -95,9 +95,15 @@ class WC_PayPlus
     {
         check_ajax_referer('websocket_check_nonce', 'nonce');
 
-        if (isset($_POST['is_active']) && $_POST['is_active']) {
+        if (isset($_POST['is_active'])) {
+            $is_active = filter_var(wp_unslash($_POST['is_active']), FILTER_VALIDATE_BOOLEAN);
+
+
+            if ($is_active) {
+                set_transient('websocket_inactive_warning', true);
+            }
             // Store a transient to display admin notice
-            set_transient('websocket_inactive_warning', true);
+
         }
 
         wp_send_json_success();
@@ -186,7 +192,7 @@ class WC_PayPlus
                         jQuery.post(ajaxurl, {
                             action: 'websocket_check_notification',
                             is_active: isActive,
-                            nonce: '<?php echo wp_create_nonce('websocket_check_nonce'); ?>'
+                            nonce: "<?php echo esc_js(wp_create_nonce('websocket_check_nonce')); ?>"
                         });
                     }
                 });
@@ -715,7 +721,7 @@ class WC_PayPlus
     public static function plugin_action_links($links)
     {
         $action_links = [
-            'settings' => '<a href="' . admin_url('admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway') . '" aria-label="' . esc_html__('View PayPlus Settings', 'payplus-payment-gateway') . '">' . esc_html__('Settings') . '</a>',
+            'settings' => '<a href="' . admin_url('admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway') . '" aria-label="' . esc_html__('View PayPlus Settings', 'payplus-payment-gateway') . '">' . esc_html__('Settings', 'payplus-payment-gateway') . '</a>',
         ];
         $links = array_merge($action_links, $links);
 

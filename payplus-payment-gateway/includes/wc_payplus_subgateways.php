@@ -204,6 +204,12 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
                 'type' => 'checkbox',
                 'default' => 'no'
             ],
+            // 'hosted_fields_width' => [
+            //     'title' => __('Set width for Embedded container (%)', 'payplus-payment-gateway'),
+            //     'description' => __('This sets the width of the Embedded container in percentage (Max is 100 of the container).', 'payplus-payment-gateway'),
+            //     'type' => 'number',
+            //     'default' => '100'
+            // ],
             'hosted_fields_payments_amount' => [
                 'class' => 'hostedNumberOfpayments',
                 'title' => __('Max number of payments:', 'payplus-payment-gateway'),
@@ -436,7 +442,7 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
     {
         parent::__construct();
         $this->id = 'payplus-payment-gateway-hostedfields';
-        $this->method_title = __('PayPlus - Embedded', 'woocommerce');
+        $this->method_title = __('PayPlus - Embedded', 'payplus-payment-gateway');
         add_action('wp_ajax_complete_order', [$this, 'complete_order_via_ajax']);
         add_action('wp_ajax_nopriv_complete_order', [$this, 'complete_order_via_ajax']);
     }
