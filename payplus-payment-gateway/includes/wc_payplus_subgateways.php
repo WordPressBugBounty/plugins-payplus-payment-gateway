@@ -33,7 +33,8 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
             __('Pay with PayPal via PayPlus', 'payplus-payment-gateway'),
             __('Pay with Tav Zahav via PayPlus', 'payplus-payment-gateway'),
             __('Pay with Valuecard via PayPlus', 'payplus-payment-gateway'),
-            __('Pay with finitiOne via PayPlus', 'payplus-payment-gateway')
+            __('Pay with finitiOne via PayPlus', 'payplus-payment-gateway'),
+            __('Pay with PayPlus Embedded', 'payplus-payment-gateway')
 
         );
         $this->allTypePayment = array(
@@ -44,7 +45,8 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
             __('PayPal', 'payplus-payment-gateway'),
             __('Tav Zahav', 'payplus-payment-gateway'),
             __('Valuecard', 'payplus-payment-gateway'),
-            __('finitiOne', 'payplus-payment-gateway')
+            __('finitiOne', 'payplus-payment-gateway'),
+            __('hostedFields', 'payplus-payment-gateway')
         );
 
         $this->method_title = $this->method_title_text;
@@ -97,6 +99,9 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
             case 'PayPlus - Valuecard':
                 $methodTitleText = esc_html__('PayPlus - Valuecard', 'payplus-payment-gateway');
                 break;
+            case 'PayPlus - Embedded':
+                $methodTitleText = esc_html__('PayPlus - Embedded', 'payplus-payment-gateway');
+                break;
         }
         $payWithText = '';
         switch ($this->pay_with_text) {
@@ -123,6 +128,9 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
                 break;
             case 'Pay with Tav finitiOne':
                 $payWithText = esc_html__('Pay with Tav finitiOne', 'payplus-payment-gateway');
+                break;
+            case 'Pay with Embedded':
+                $payWithText = esc_html__('Pay with Embedded', 'payplus-payment-gateway');
                 break;
         }
         $this->form_fields = [
@@ -178,8 +186,45 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
                 ],
                 'default' => '1',
             ],
+            'hide_loader_logo' => [
+                'title' => __('Hide PayPlus logo when showing loader', 'payplus-payment-gateway'),
+                'description' => __('Hide PayPlus from loader and display: "Processing..."', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'default' => 'yes'
+            ],
+            'hide_payplus_gateway' => [
+                'title' => __('Hide PayPlus gateway (No saved tokens)', 'payplus-payment-gateway'),
+                'description' => __('Hide PayPlus gateway if current user has no saved tokens', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'default' => 'no'
+            ],
+            'hosted_fields_is_main' => [
+                'title' => __('Make PayPlus Embedded main gateway', 'payplus-payment-gateway'),
+                'description' => __('Make PayPlus Embedded main gateway (Overrides "Hide PayPlus gateway")<br>[No subscription support yet!]', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'default' => 'no'
+            ],
+            'hosted_fields_payments_amount' => [
+                'class' => 'hostedNumberOfpayments',
+                'title' => __('Max number of payments:', 'payplus-payment-gateway'),
+                'description' => __('Applicable only if payments are enabled for your payment page.<br>(Applicable max is 99)', 'payplus-payment-gateway'),
+                'type' => 'number',
+                'default' => '3'
+            ]
         ];
         if ($this->id === 'payplus-payment-gateway-multipass') {
+            unset($this->form_fields['sub_hide_other_charge_methods']);
+        }
+        if ($this->id !== 'payplus-payment-gateway-hostedfields') {
+            unset($this->form_fields['hosted_fields_width']);
+            unset($this->form_fields['hide_payplus_gateway']);
+            unset($this->form_fields['hide_loader_logo']);
+            unset($this->form_fields['hosted_fields_is_main']);
+            unset($this->form_fields['hosted_fields_payments_amount']);
+        }
+        if ($this->id === 'payplus-payment-gateway-hostedfields') {
+            unset($this->form_fields['display_mode']);
+            unset($this->form_fields['iframe_height']);
             unset($this->form_fields['sub_hide_other_charge_methods']);
         }
     }
@@ -235,9 +280,13 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
             case 'Pay with finitiOne via PayPlus':
                 $methodDescriptionText = esc_html__('Pay with finitiOne via PayPlus', 'payplus-payment-gateway');
                 break;
+            case 'Pay with PayPlus Embedded':
+                $methodDescriptionText = esc_html__('Pay with PayPlus Embedded', 'payplus-payment-gateway');
+                break;
         }
 
         $subOptionsettings = get_option($this->get_option_key(), $defaultOptions);
+
         $this->settings = get_option('woocommerce_payplus-payment-gateway_settings', $defaultOptions);
 
         $this->enabled = $this->settings['enabled'] = $subOptionsettings['enabled'];
@@ -246,8 +295,13 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
         $this->settings['display_mode'] = $subOptionsettings['display_mode'];
         $this->settings['hide_icon'] = $subOptionsettings['hide_icon'];
         $this->settings['iframe_height'] = $subOptionsettings['iframe_height'];
+        $this->settings['hosted_fields_width'] = isset($subOptionsettings['hosted_fields_width']) ? $subOptionsettings['hosted_fields_width'] : 100;
+        $this->settings['hosted_fields_payments_amount'] = isset($subOptionsettings['hosted_fields_payments_amount']) ? $subOptionsettings['hosted_fields_payments_amount'] : 3;
+        $this->settings['hide_payplus_gateway'] = isset($subOptionsettings['hide_payplus_gateway']) ? $subOptionsettings['hide_payplus_gateway'] : 'no';
+        $this->settings['hide_loader_logo'] = isset($subOptionsettings['hide_loader_logo']) ? $subOptionsettings['hide_loader_logo'] : 'no';
+        $this->settings['hosted_fields_is_main'] = isset($subOptionsettings['hosted_fields_is_main']) ? $subOptionsettings['hosted_fields_is_main'] : 'no';
         $this->settings['default_charge_method'] = $this->payplus_default_charge_method;
-        $this->settings['sub_hide_other_charge_methods'] = isset($subOptionsettings['sub_hide_other_charge_methods']) ? $subOptionsettings['sub_hide_other_charge_methods'] : null;
+        $this->settings['sub_hide_other_charge_methods'] = isset($subOptionsettings['sub_hide_other_charge_methods']) ? $subOptionsettings['sub_hide_other_charge_methods'] : false;
 
         if ($this->settings['sub_hide_other_charge_methods'] != 2 && $this->settings['sub_hide_other_charge_methods'] !== null) {
             $this->settings['hide_other_charge_methods'] = $this->settings['sub_hide_other_charge_methods'];
@@ -366,4 +420,63 @@ class WC_PayPlus_Gateway_FinitiOne extends WC_PayPlus_Subgateway
     public $payplus_default_charge_method = 'finitione';
     public $iconURL = 'assets/images/finitioneLogo.png';
     public $pay_with_text = 'Pay with Tav finitiOne';
+}
+
+class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
+{
+    public $id = 'payplus-payment-gateway-hostedfields';
+    public $method_title_text = 'PayPlus - Embedded';
+    public $default_description_settings_text = 'payment via PayPlus Embedded';
+    public $method_description_text = 'Pay with PayPlus Embedded';
+    public $payplus_default_charge_method = 'hostedFields';
+    public $iconURL = 'assets/images/PayPlusLogo.svg';
+    public $pay_with_text = 'Pay with PayPlus Embedded';
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->id = 'payplus-payment-gateway-hostedfields';
+        $this->method_title = __('PayPlus - Embedded', 'woocommerce');
+        add_action('wp_ajax_complete_order', [$this, 'complete_order_via_ajax']);
+        add_action('wp_ajax_nopriv_complete_order', [$this, 'complete_order_via_ajax']);
+    }
+
+    public function complete_order_via_ajax()
+    {
+        check_ajax_referer('frontNonce', '_ajax_nonce');
+        $order_id = isset($_POST['order_id']) ? intval($_POST['order_id']) : 0;
+        $payment_response = isset($_POST['payment_response']['data']['result']) ? sanitize_text_field(wp_unslash($_POST['payment_response']['data']['result'])) : '';
+
+        $order = wc_get_order($order_id);
+
+        if ($order && $payment_response === "success") {
+            // Mark the order as completed or paid
+            $order->payment_complete();
+            WC()->cart->empty_cart();
+
+            $redirect_to = add_query_arg('order-received', $order_id, add_query_arg('key', $order->get_order_key(), get_permalink(wc_get_page_id('checkout'))));
+
+            wp_send_json_success(array(
+                'redirect_url' => $redirect_to
+            ));
+        } else {
+            wp_send_json_error(array('message' => 'Payment failed'));
+        }
+    }
+
+    // Override the process_payment method
+    public function process_payment($order_id)
+    {
+        $order = wc_get_order($order_id);
+        if ($this->id === "payplus-payment-gateway-hostedfields") {
+            new WC_PayPlus_HostedFields($order_id, $order);
+        }
+
+        return array(
+            'result'   => 'success',
+            'order_id' => $order_id,
+            'method' => 'hostedFields',
+            'nonce'    => wp_create_nonce('hostedPaymentNonce'),
+        );
+    }
 }

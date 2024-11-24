@@ -167,6 +167,32 @@ class WC_PayPlus_Admin_Settings
             case 'payplus-error-setting':
                 $settings[$section][] = array('type' => 'sectionend', 'id' => 'payplus-error-setting');
                 break;
+            case 'payplus-payment-gateway-hostedfields':
+                $settings[$section][] = array(
+                    'name' => '',
+                    'type' => 'title',
+                    'id' => 'payplus-payment-gateway-hostedfields[clubsTitle]'
+                );
+                $settings[$section][] = array(
+                    'name' => esc_html__('Select your cards (optional):', 'payplus-payment-gateway'),
+                    'id' => 'payplus-payment-gateway-hostedfields[cards]',
+                    'desc' => __("Choose card icons to be displayed (none for default).", 'payplus-payment-gateway'),
+                    'type' => 'multiselect',
+                    'class' => 'myHostedCards',
+                    'options' => [
+                        'amex' => esc_html__('American Express', 'payplus-payment-gateway'),
+                        'visa' => esc_html__('Visa', 'payplus-payment-gateway'),
+                        'max' => esc_html__('MAX', 'payplus-payment-gateway'),
+                        'isracard' => esc_html__('Isracard', 'payplus-payment-gateway'),
+                        'discover' => esc_html__('Discover', 'payplus-payment-gateway'),
+                        'diners' => esc_html__('Diners', 'payplus-payment-gateway'),
+                        'mastercard' => esc_html__('Mastercard', 'payplus-payment-gateway'),
+                        'maestro' => esc_html__('Maestro', 'payplus-payment-gateway'),
+                        'jcb' => esc_html__('JCB', 'payplus-payment-gateway'),
+                    ]
+                );
+                $settings[$section][] = array('type' => 'sectionend', 'id' => 'payplus-payment-gateway-hostedfields');
+                break;
             case 'payplus-payment-gateway-multipass':
                 $settings[$section][] = array(
                     'name' => '',
@@ -394,17 +420,9 @@ class WC_PayPlus_Admin_Settings
                     'name' => __('Don`t add invoice+ links to order notes', 'payplus-payment-gateway'),
                     'id' => 'payplus_invoice_option[invoices_notes_no]',
                     'type' => 'checkbox',
-                    'default' => 'no',
+                    'default' => 'yes',
                     'class' => 'payplus-display'
                 );
-                // $settings[$section][] = [
-                //     'title' => __('Show pick up  method on invoice', 'payplus-payment-gateway'),
-                //     'type' => 'checkbox',
-                //     'label' => '',
-                //     'default' => 'no',
-                //     'id' => 'woocommerce_payplus-payment-gateway_settings[is_Local_pickup]',
-                //     'class' => 'payplus-documents'
-                // ];
                 $settings[$section][] = [
                     'title' => __('Every order is subject to VAT', 'payplus-payment-gateway'),
                     'type' => 'checkbox',
@@ -450,10 +468,11 @@ class WC_PayPlus_Admin_Settings
                     'title' => __('Calculate VAT According to:', 'payplus-payment-gateway'),
                     'type' => 'select',
                     'options' => [
-                        '0' => __('Payment Page Default Setting', 'payplus-payment-gateway'),
+                        '0' => __('Default', 'payplus-payment-gateway'),
                         '1' => __('PayPlus', 'payplus-payment-gateway'),
                         '2' => __('WooCommerce', 'payplus-payment-gateway'),
                     ],
+                    'desc' => __('If you don`t know what to do here leave it on default :)', 'payplus-payment-gateway'),
                     'default' => '0',
                     'id' => 'woocommerce_payplus-payment-gateway_settings[initial_invoice]',
                     'class' => 'payplus-vat'

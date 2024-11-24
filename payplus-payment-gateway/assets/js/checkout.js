@@ -6,8 +6,15 @@ jQuery(function ($) {
     return false;
   }
 
-  $.blockUI.defaults.overlayCSS.cursor = "default";
+  let hostedIsMain = payplus_script_checkout.hostedFieldsIsMain;
+  let payPlusMain = "payment_method_payplus-payment-gateway";
+  let payPlusHosted = "payment_method_payplus-payment-gateway-hostedfields";
+  let inputPayPlus = payPlusHosted;
 
+  $.blockUI.defaults.overlayCSS.cursor = "default";
+  let hasSavedCCs = Object.keys(payplus_script_checkout.hasSavedTokens);
+
+  //function to hide other payment methods when subscription order
   function subscriptionOrderHide() {
     // Select all elements with the wc_payment_method class inside .wc_payment_methods.payment_methods.methods
     $(".wc_payment_methods.payment_methods.methods .wc_payment_method").each(
@@ -27,22 +34,51 @@ jQuery(function ($) {
     );
   }
 
-  setTimeout(function () {
-    // Automatically click the 'Place Order' button
-    let hasSavedCCs = $(".woocommerce-SavedPaymentMethods-token");
-    if (payplus_script_checkout.isAutoPPCC && hasSavedCCs.length === 0) {
-      jQuery("html, body").animate(
-        {
-          scrollTop: jQuery(".pp_iframe")?.offset()?.top,
-        },
-        1000
-      ); // 1000 is the duration in milliseconds (1 second)
-      $("#payment_method_payplus-payment-gateway").trigger("click");
-      $("#wc-payplus-payment-gateway-payment-token-new").trigger("click");
-      $("#wc-payplus-payment-gateway-new-payment-method").trigger("click");
-      $("button#place_order").trigger("click");
+  if (payplus_script_checkout.isHostedFields) {
+    // Add save token checkbox to hosted fields container //
+    var $hostedDiv = jQuery("body > div.container.hostedFields");
+    var $checkbox = $(
+      '<p class="hf-save form-row">' +
+        '<label for="save_token_checkbox">' +
+        '<input type="checkbox" name="wc-save-token" id="save_token_checkbox" value="1" style="margin:0 10px 0 10px;"/>' +
+        " " +
+        payplus_script_checkout.saveCreditCard +
+        "</label>" +
+        "</p>"
+    );
+
+    payplus_script_checkout.isLoggedIn &&
+    payplus_script_checkout.isSavingCerditCards
+      ? $hostedDiv.append($checkbox)
+      : null;
+
+    if (hasSavedCCs.length === 0) {
+      setTimeout(function () {
+        $("input#" + inputPayPlus).prop("checked", true);
+        $("#submit-payment").hide();
+        $("div.container.hostedFields").show();
+      }, 1000);
+    } else {
+      setTimeout(function () {
+        $(".payment_method_payplus-payment-gateway").css("display", "block");
+        $("input#" + inputPayPlus).prop("checked", false);
+        const mainPayPlus = "payment_method_payplus-payment-gateway";
+        $("input#" + mainPayPlus).prop("checked", true);
+      }, 2000);
     }
-  }, 1000); // You can adjust the delay time as needed
+    $(document).on("change", 'input[name="payment_method"]', function () {
+      // Check if the hosted fields radio input is NOT checked
+      if (!$("input#" + inputPayPlus).is(":checked")) {
+        $("#submit-payment").hide();
+        $("div.container.hostedFields").show();
+        $(".container.hostedFields").hide();
+        // $("button#place_order").show();
+      } else {
+        $("div.container.hostedFields").show();
+        $("#submit-payment").hide();
+      }
+    });
+  }
 
   var wc_checkout_form = {
     updateTimer: false,
@@ -494,7 +530,23 @@ jQuery(function ($) {
             }
           });
 
+          if (
+            payplus_script_checkout.isHostedFields &&
+            hasSavedCCs.length === 0 &&
+            payplus_script_checkout.hidePPGateway
+          ) {
+            const checkoutPaymentFragment =
+              data.fragments[".woocommerce-checkout-payment"];
+            const modifiedString = modifyCheckoutPaymentFragment(
+              checkoutPaymentFragment,
+              "wc_payment_method.payment_method_payplus-payment-gateway"
+            );
+
+            data.fragments[".woocommerce-checkout-payment"] = modifiedString;
+          }
+
           // Always update the fragments
+          let hostedFields = $(".hostedFields").prop("outerHTML");
           if (data && data.fragments) {
             $.each(data.fragments, function (key, value) {
               if (
@@ -513,12 +565,92 @@ jQuery(function ($) {
               }
               $(key).unblock();
             });
+            if (payplus_script_checkout.isHostedFields) {
+              putHostedFields(inputPayPlus, hostedIsMain);
+            }
             wc_checkout_form.fragments = data.fragments;
+          }
+          var coupons = [];
+          var couponCode;
+          var totalDiscount = 0;
+          let isSubmitting = false;
+
+          // var selectedShippingMethod = $(
+          //     'input[name="shipping_method[0]"]:checked'
+          // ).val();
+
+          if (isSubmitting) return; // Prevent multiple submissions
+          isSubmitting = true; // Set flag to true to block further submissions
+
+          // console.log(
+          //     "Selected shipping method ID: " + selectedShippingMethod
+          // );
+
+          // Find the label associated with the selected shipping method
+          var label = $('input[name="shipping_method[0]"]:checked')
+            .closest("li")
+            .find("label")
+            .text();
+
+          if (label === "") {
+            label = $('input[name="shipping_method[0]"]')
+              .closest("li")
+              .find("label")
+              .text();
+          }
+          // Adjust the regex to support both $ and ₪ (or any currency symbol at start or end)
+          var priceMatch = label.match(
+            /(\$|₪)\s*([0-9.,]+)|([0-9.,]+)\s*(\$|₪)/
+          );
+
+          let shippingPrice = 0;
+          if (priceMatch) {
+            var currency = priceMatch[1] || priceMatch[4]; // Captures the currency symbol
+            shippingPrice = priceMatch[2] || priceMatch[3]; // Captures the price number
+          }
+
+          if (payplus_script_checkout.isHostedFields) {
+            $(document.body).on("updated_checkout", function () {
+              putHostedFields(inputPayPlus, hostedIsMain);
+            });
           }
 
           // Recheck the terms and conditions box, if needed
           if (termsCheckBoxChecked) {
             $("#terms").prop("checked", true);
+          }
+
+          function putHostedFields(inputPayPlus, hostedIsMain) {
+            const hideHostedFieldsListItem = () => {
+              $(".woocommerce-SavedPaymentMethods-new").hide();
+              $(".woocommerce-SavedPaymentMethods-saveNew").hide();
+            };
+            hostedIsMain ? hideHostedFieldsListItem() : null;
+
+            var $paymentMethod = jQuery("#" + inputPayPlus);
+
+            // Find the closest parent <li>
+            var $topLi = jQuery(".pp_iframe_h");
+
+            // Select the existing div element that you want to move
+
+            var $hostedLi = jQuery(".wc_payment_method." + inputPayPlus);
+            let $hostedRow = $hostedDiv.find(".hf-main").first();
+            if ($paymentMethod.length && $topLi.length && $hostedDiv.length) {
+              if (payplus_script_checkout.hostedFieldsWidth) {
+                $hostedRow.attr("style", function (i, style) {
+                  // Return the width with !important without adding an extra semicolon
+                  return (
+                    "width: " +
+                    payplus_script_checkout.hostedFieldsWidth +
+                    "% !important;" +
+                    (style ? " " + style : "")
+                  );
+                });
+              }
+              $topLi.append($hostedDiv);
+              $hostedLi.append($topLi);
+            }
           }
 
           // Fill in the payment details if possible without overwriting data if set.
@@ -657,16 +789,15 @@ jQuery(function ($) {
               var maybe_valid_json = raw_response.match(/{"result.*}/);
 
               if (null === maybe_valid_json) {
-                console.log("Unable to fix malformed JSON");
+                // console.log("Unable to fix malformed JSON");
               } else if (wc_checkout_form.is_valid_json(maybe_valid_json[0])) {
-                console.log("Fixed malformed JSON. Original:");
-                console.log(raw_response);
+                // console.log("Fixed malformed JSON. Original:");
+                // console.log(raw_response);
                 raw_response = maybe_valid_json[0];
               } else {
-                console.log("Unable to fix malformed JSON");
+                // console.log("Unable to fix malformed JSON");
               }
             }
-
             return raw_response;
           },
         });
@@ -677,62 +808,75 @@ jQuery(function ($) {
           data: $form.serialize(),
           dataType: "json",
           success: function (result) {
-            // Detach the unload handler that prevents a reload / redirect
-            wc_checkout_form.detachUnloadEventsOnSubmit();
-            if (result.payplus_iframe && "success" === result.result) {
+            if (result.method === "hostedFields") {
+              overlay();
+              jQuery(".blocks-payplus_loader_hosted").fadeIn();
               wc_checkout_form.$checkout_form
                 .removeClass("processing")
                 .unblock();
-              if (result.viewMode == "samePageIframe") {
-                openPayplusIframe(result.payplus_iframe.data.payment_page_link);
-              } else if (result.viewMode == "popupIframe") {
-                openIframePopup(
-                  result.payplus_iframe.data.payment_page_link,
-                  700
-                );
-              }
-              return true;
-            }
-            try {
-              if (
-                "success" === result.result &&
-                $form.triggerHandler("checkout_place_order_success", result) !==
-                  false
-              ) {
-                if (
-                  -1 === result.redirect.indexOf("https://") ||
-                  -1 === result.redirect.indexOf("http://")
-                ) {
-                  window.location = result.redirect;
-                } else {
-                  window.location = decodeURI(result.redirect);
+              hf.SubmitPayment();
+            } else {
+              // Detach the unload handler that prevents a reload / redirect
+              wc_checkout_form.detachUnloadEventsOnSubmit();
+              if (result.payplus_iframe && "success" === result.result) {
+                wc_checkout_form.$checkout_form
+                  .removeClass("processing")
+                  .unblock();
+                if (result.viewMode == "samePageIframe") {
+                  openPayplusIframe(
+                    result.payplus_iframe.data.payment_page_link
+                  );
+                } else if (result.viewMode == "popupIframe") {
+                  openIframePopup(
+                    result.payplus_iframe.data.payment_page_link,
+                    700
+                  );
                 }
-              } else if ("failure" === result.result) {
-                throw "Result failure";
-              } else {
-                throw "Invalid response";
+                return true;
               }
-            } catch (err) {
-              // Reload page
-              if (true === result.reload) {
-                window.location.reload();
-                return;
-              }
+              try {
+                if (
+                  "success" === result.result &&
+                  $form.triggerHandler(
+                    "checkout_place_order_success",
+                    result
+                  ) !== false
+                ) {
+                  if (
+                    -1 === result.redirect.indexOf("https://") ||
+                    -1 === result.redirect.indexOf("http://")
+                  ) {
+                    window.location = result.redirect;
+                  } else {
+                    window.location = decodeURI(result.redirect);
+                  }
+                } else if ("failure" === result.result) {
+                  throw "Result failure";
+                } else {
+                  throw "Invalid response";
+                }
+              } catch (err) {
+                // Reload page
+                if (true === result.reload) {
+                  window.location.reload();
+                  return;
+                }
 
-              // Trigger update in case we need a fresh nonce
-              if (true === result.refresh) {
-                $(document.body).trigger("update_checkout");
-              }
+                // Trigger update in case we need a fresh nonce
+                if (true === result.refresh) {
+                  $(document.body).trigger("update_checkout");
+                }
 
-              // Add new errors
-              if (result.messages) {
-                wc_checkout_form.submit_error(result.messages);
-              } else {
-                wc_checkout_form.submit_error(
-                  '<div class="woocommerce-error">' +
-                    wc_checkout_params.i18n_checkout_error +
-                    "</div>"
-                ); // eslint-disable-line max-len
+                // Add new errors
+                if (result.messages) {
+                  wc_checkout_form.submit_error(result.messages);
+                } else {
+                  wc_checkout_form.submit_error(
+                    '<div class="woocommerce-error">' +
+                      wc_checkout_params.i18n_checkout_error +
+                      "</div>"
+                  ); // eslint-disable-line max-len
+                }
               }
             }
           },
@@ -1060,7 +1204,7 @@ jQuery(function ($) {
   // Add custom icons field if exists under cc method description
   function addCustomIcons() {
     if (payplus_script_checkout.customIcons[0].length > 0) {
-      var $newDiv = $("<div></div>", {
+      var $hostedDiv = $("<div></div>", {
         class: "payplus-checkout-image-container", // Optional: Add a class to the div
         id: "payplus-checkout-image-div", // Optional: Add an ID to the div
         style: "display: flex;",
@@ -1071,10 +1215,31 @@ jQuery(function ($) {
           alt: "Image " + (index + 1), // Optional: Set alt text for accessibility
           style: "max-width: 100%; max-height:65px;object-fit: contain;", // Optional: Set inline styles
         });
-        $newDiv.append($img);
+        $hostedDiv.append($img);
       });
-      $("div.payment_method_payplus-payment-gateway").prepend($newDiv);
+      $("div.payment_method_payplus-payment-gateway").prepend($hostedDiv);
     }
+  }
+
+  function modifyCheckoutPaymentFragment(fragmentHtml, liClassToRemove) {
+    // Create a temporary div to hold the HTML string
+    const tempDiv = document.createElement("div");
+
+    // Set the inner HTML of the temp div to the fragment HTML
+    tempDiv.innerHTML = fragmentHtml;
+
+    // Select the <li> elements with the specified class
+    const liElements = tempDiv.querySelectorAll(`.${liClassToRemove}`);
+
+    // Loop through the selected <li> elements and remove them
+    liElements.forEach((li) => {
+      li.remove();
+    });
+
+    // Convert the modified contents back to a string
+    const modifiedFragmentString = tempDiv.innerHTML;
+    // Return the modified string if needed
+    return modifiedFragmentString;
   }
 
   function multiPassIcons(loopImages) {

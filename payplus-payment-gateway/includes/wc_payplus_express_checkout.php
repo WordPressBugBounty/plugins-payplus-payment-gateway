@@ -227,8 +227,9 @@ class WC_PayPlus_Express_Checkout extends WC_PayPlus
             $order->calculate_totals();
             $order_id = $order->save();
             $payload = $WC_PayPlus_Gateway->generatePayloadLink($order_id);
-            $payload = json_decode($payload, true);
             WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload' => $payload]);
+            $payload = json_decode($payload, true);
+
             $arrRemove = array('expiry_datetime', 'hide_other_charge_methods', 'refURL_success', 'refURL_failure', 'refURL_callback', 'charge_default');
             if (count($payload)) {
                 foreach ($payload as $key => $value) {
@@ -487,7 +488,7 @@ class WC_PayPlus_Express_Checkout extends WC_PayPlus
                     foreach ($cart as $cart_item_key => $cart_item) {
                         $productId = $cart_item['product_id'];
                         // $product = new WC_Product($productId);
-                        if (!empty($cart_item['variation_id'])) {
+                        if (isset($cart_item['variation_id']) && !empty($cart_item['variation_id'])) {
                             $product = new WC_Product_Variable($productId);
                             $productData = $product->get_available_variation($cart_item['variation_id']);
                             $tax = (WC()->cart->get_total_tax()) ? WC()->cart->get_total_tax() / $cart_item['quantity'] : 0;

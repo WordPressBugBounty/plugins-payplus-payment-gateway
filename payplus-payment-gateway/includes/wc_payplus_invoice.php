@@ -319,6 +319,8 @@ class PayplusInvoice
         }
 
         $payload['customer'] = $this->payplus_get_client_by_order_id($order_id);
+        $payload['customer']['country_iso'] === "IL" && boolval($WC_PayPlus_Gateway->paying_vat_all_order === "yes") ? $payload['customer']['paying_vat'] = true : null;
+
         if (!empty($this->payplus_invoice_brand_uid)) {
             $payload['brand_uuid'] = $this->payplus_invoice_brand_uid;
         }
@@ -624,6 +626,7 @@ class PayplusInvoice
         $items = $order->get_items(['line_item', 'fee', 'coupon']);
         $tax = 1;
         $wc_tax_enabled = wc_tax_enabled();
+        $isTaxIncluded = wc_prices_include_tax();
         if (is_numeric($temptax)) {
             $tax = 1 + ($temptax / 100);
         }
@@ -719,10 +722,11 @@ class PayplusInvoice
                     $itemDetails['product_invoice_extra_details'] = str_replace(["'", '"', "\n", "\\"], '', wp_strip_all_tags($meta_html));
                 }
 
-                if ($item_data->get_tax_status() == 'none' || !$wc_tax_enabled) {
-                    $itemDetails['vat_type_code'] = 'vat-type-exempt';
-                } else {
-                    $itemDetails['vat_type_code'] = 'vat-type-included';
+                $itemDetails['vat_type_code'] = 'vat-type-included';
+
+                if ($wc_tax_enabled) {
+                    $itemDetails['vat_type_code'] = $product->get_tax_status() === 'taxable' ? 'vat-type-included' : 'vat-type-exempt';
+                    $itemDetails['vat_type_code'] = $product->get_tax_status() === 'none' ? 'vat-type-exempt' : $itemDetails['vat_type_code'];
                 }
 
                 $productsItems[] = $itemDetails;
@@ -1228,7 +1232,7 @@ class PayplusInvoice
             for ($i = 0; $i < count($resultApps); $i++) {
 
                 $resultApp = $resultApps[$i];
-                $create_at = $resultApp->create_at;
+                $create_at = property_exists($resultApp, 'create_at') ? $resultApp->create_at : null;
                 $paymentType = 'payment-app';
                 $typePayment = array();
                 if (in_array($resultApp->method_payment, array('credit-card', 'paypal', 'other', 'cash', 'payment-check', 'bank-transfer', 'withholding-tax'))) {
@@ -1245,10 +1249,12 @@ class PayplusInvoice
                 }
                 if (in_array($resultApp->method_payment, $typeAll)) {
                     if ($resultApp->method_payment == "credit-card") {
-                        if ($resultApp->transaction_type == "payments" || $resultApp->transaction_type == "credit") {
-                            $typePayment['payments'] = (intval($resultApp->number_of_payments) > 1) ? $resultApp->number_of_payments : 1;
+                        if (property_exists($resultApp, 'transaction_type')) {
+                            if ($resultApp->transaction_type == "payments" || $resultApp->transaction_type == "credit") {
+                                $typePayment['payments'] = (intval($resultApp->number_of_payments) > 1) ? $resultApp->number_of_payments : 1;
+                            }
+                            $typePayment['transaction_type'] = $resultApp->transaction_type;
                         }
-                        $typePayment['transaction_type'] = $resultApp->transaction_type;
                         $typePayment['card_type'] = $resultApp->brand_name;
                     } elseif ($resultApp->method_payment == "tav-zahav" || $resultApp->method_payment == "multipass") {
                         $typePayment['transaction_number'] = $payplusApprovalNum;

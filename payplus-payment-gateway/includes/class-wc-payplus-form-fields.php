@@ -57,7 +57,8 @@ class WC_PayPlus_Form_Fields
         global $submenu;
         $parent_slug = 'payplus-payment-gateway';
         $payplus_payment_gateway_settings = get_option('woocommerce_payplus-payment-gateway_settings');
-        $showOrdersButton = boolval(isset($payplus_payment_gateway_settings['payplus_orders_check_button']) && $payplus_payment_gateway_settings['payplus_orders_check_button'] === 'yes');
+        $isPayPlus = boolval(isset($payplus_payment_gateway_settings['enabled']) && $payplus_payment_gateway_settings['enabled'] === 'yes');
+        $showOrdersButton = boolval($isPayPlus && isset($payplus_payment_gateway_settings['payplus_orders_check_button']) && $payplus_payment_gateway_settings['payplus_orders_check_button'] === 'yes');
         $showSubGatewaysOnSide = boolval(isset($payplus_payment_gateway_settings['payplus_show_sub_gateways_side_menu']) && $payplus_payment_gateway_settings['payplus_show_sub_gateways_side_menu'] === 'yes');
 
         add_menu_page(
@@ -253,7 +254,7 @@ class WC_PayPlus_Form_Fields
             'checkout_page_title' => [
                 'title' => __('Checkout Page Options', 'payplus-payment-gateway'),
                 'type' => 'title',
-                'description' => __('Setup for the wordpress checkout page.', 'payplus-payment-gateway'),
+                'description' => __('Setup for the woocommerce checkout page.', 'payplus-payment-gateway'),
             ],
             'hide_icon' => [
                 'title' => __('Hide PayPlus Icon', 'payplus-payment-gateway'),

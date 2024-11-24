@@ -16,6 +16,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         'payplus-payment-gateway-tavzahav',
         'payplus-payment-gateway-valuecard',
         'payplus-payment-gateway-finitione',
+        'payplus-payment-gateway-hostedfields',
     );
     public $applePaySettings;
     public $isApplePayEnabled;
@@ -214,7 +215,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
      * @param $order
      * @return void
      */
-    public function payplusIpn($order_id = null, $_wpnonce = null)
+    public function payplusIpn($order_id = null, $_wpnonce = null, $saveToken = false, $isHostedPayment = false)
     {
 
         $this->isInitiated();
@@ -310,24 +311,31 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                 'payplus_voucher_num' => esc_html($responseBody['data']['voucher_num'])
             ];
 
-            WC_PayPlus_Meta_Data::update_meta($order, $responseArray);
+            $responseBody['data']['status'] === "approved" && $responseBody['data']['status_code'] === "000" ? WC_PayPlus_Meta_Data::update_meta($order, $responseArray) : $order->add_order_note('PayPlus IPN: ' . sanitize_text_field(wp_unslash($responseBody['data']['status'])));
+
             $transactionUid = $responseBody['data']['transaction_uid'];
 
-            if ($responseBody['data']['status'] === 'approved' && $responseBody['data']['status_code'] === '000' && $responseBody['data']['type'] === 'Charge') {
-                WC_PayPlus_Meta_Data::sendMoreInfo($order, 'wc-processing', $transactionUid);
-                $order->update_status('wc-processing');
-                if ($this->saveOrderNote) {
-                    $order->add_order_note(
-                        $successNote
-                    );
+            if ($responseBody['data']['status'] === 'approved' && $responseBody['data']['status_code'] === '000') {
+                if ($responseBody['data']['type'] === 'Charge') {
+                    WC_PayPlus_Meta_Data::sendMoreInfo($order, 'wc-processing', $transactionUid);
+                    $order->update_status('wc-processing');
+                    if ($this->saveOrderNote) {
+                        $order->add_order_note(
+                            $successNote
+                        );
+                    }
+                } elseif ($responseBody['data']['type'] === 'Approval') {
+                    WC_PayPlus_Meta_Data::sendMoreInfo($order, 'wc-on-hold', $transactionUid);
+                    $order->update_status('wc-on-hold');
+                    if ($this->saveOrderNote) {
+                        $order->add_order_note(
+                            $successNote
+                        );
+                    }
                 }
-            } elseif ($responseBody['data']['status'] === 'approved' && $responseBody['data']['status_code'] === '000' && $responseBody['data']['type'] === 'Approval') {
-                WC_PayPlus_Meta_Data::sendMoreInfo($order, 'wc-on-hold', $transactionUid);
-                $order->update_status('wc-on-hold');
-                if ($this->saveOrderNote) {
-                    $order->add_order_note(
-                        $successNote
-                    );
+                if ($this->create_pp_token && $isHostedPayment && $saveToken) {
+                    $user_id = $order->get_user_id();
+                    $this->save_token($responseBody['data'], $user_id);
                 }
             }
         } else {
@@ -1969,6 +1977,10 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
             $chargeByItems = false;
             $amount = round((float) $payplusChargeAmount, 2);
             $transaction_uid = $order->get_meta('payplus_transaction_uid');
+            if (empty($transaction_uid)) {
+                $transaction_uid = json_decode($order->get_meta('payplus_response'), true)['transaction_uid'];
+                WC_PayPlus_Meta_Data::update_meta($order, array('transaction_uid' => $transaction_uid));
+            }
             if ($OrderType == "Charge") {
                 echo esc_url($urlEdit);
                 wp_die();
@@ -2104,7 +2116,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         $current_language = get_locale();
         $transactionType = $this->get_option('transaction_type');
 
-        wp_enqueue_style('payplus', PAYPLUS_PLUGIN_URL . 'assets/css/admin.css', [], PAYPLUS_VERSION);
+        wp_enqueue_style('payplus', PAYPLUS_PLUGIN_URL . 'assets/css/admin.min.css', [], PAYPLUS_VERSION);
         wp_register_script('payplus-admin-payment', PAYPLUS_PLUGIN_URL . '/assets/js/admin-payments.min.js', ['jquery'], time(), true);
         wp_localize_script(
             'payplus-admin-payment',
@@ -2132,6 +2144,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                 "payplusCustomAction" => wp_create_nonce('payplus_payplus_ipn'),
                 "frontNonce" => wp_create_nonce('frontNonce'),
                 "isApplePayEnabled" => $this->isApplePayEnabled,
+                "tokenPaymentConfirmMessage" => __('Are you sure you want to charge this order with token of CC that ends with: ', 'payplus-payment-gateway'),
             )
         );
         wp_enqueue_script('payplus-admin-payment');

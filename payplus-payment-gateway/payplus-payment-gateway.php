@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.2.3
+ * Version: 7.2.5
  * Tested up to: 6.7
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,14 +19,15 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.2.3');
-define('PAYPLUS_VERSION_DB', 'payplus_3_4');
+define('PAYPLUS_VERSION', '7.2.5');
+define('PAYPLUS_VERSION_DB', 'payplus_3_5');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
     protected static $instance = null;
     public $notices = [];
     private $payplus_payment_gateway_settings;
+    public $isPayPlus;
     public $applePaySettings;
     public $isApplePayGateWayEnabled;
     public $isApplePayExpressEnabled;
@@ -34,6 +35,8 @@ class WC_PayPlus
     public $isAutoPPCC;
     private $_wpnonce;
     public $importApplePayScript;
+    public $hostedFieldsOptions;
+    private $isHostedInitiated = false;
 
     /**
      * The main PayPlus gateway instance. Use get_main_payplus_gateway() to access it.
@@ -49,11 +52,13 @@ class WC_PayPlus
     {
         //ACTION
         $this->payplus_payment_gateway_settings = (object) get_option('woocommerce_payplus-payment-gateway_settings');
+        $this->hostedFieldsOptions = get_option('woocommerce_payplus-payment-gateway-hostedfields_settings');
         $this->applePaySettings = get_option('woocommerce_payplus-payment-gateway-applepay_settings');
         $this->isApplePayGateWayEnabled = boolval(isset($this->applePaySettings['enabled']) && $this->applePaySettings['enabled'] === "yes");
         $this->isApplePayExpressEnabled = boolval(property_exists($this->payplus_payment_gateway_settings, 'enable_apple_pay') && $this->payplus_payment_gateway_settings->enable_apple_pay === 'yes');
         $this->isAutoPPCC = boolval(property_exists($this->payplus_payment_gateway_settings, 'auto_load_payplus_cc_method') && $this->payplus_payment_gateway_settings->auto_load_payplus_cc_method === 'yes');
         $this->importApplePayScript = boolval(property_exists($this->payplus_payment_gateway_settings, 'import_applepay_script') && $this->payplus_payment_gateway_settings->import_applepay_script === 'yes');
+        $this->isPayPlus = boolval(property_exists($this->payplus_payment_gateway_settings, 'enabled') && $this->payplus_payment_gateway_settings->enabled === 'yes');
 
         add_action('admin_init', [$this, 'check_environment']);
         add_action('admin_notices', [$this, 'admin_notices'], 15);
@@ -62,19 +67,247 @@ class WC_PayPlus
         add_action('woocommerce_email_before_order_table', [$this, 'payplus_add_content_specific_email'], 20, 4);
         add_action('wp_head', [$this, 'payplus_no_index_page_error']);
         add_action('woocommerce_api_payplus_gateway', [$this, 'ipn_response']);
+        add_action('wp_ajax_make-hosted-payment', [$this, 'hostedPayment']);
+        add_action('wp_ajax_nopriv_make-hosted-payment', [$this, 'hostedPayment']);
+
         //end custom hook
 
         add_action('woocommerce_before_checkout_form', [$this, 'msg_checkout_code']);
+        // add_action('admin_enqueue_scripts', [$this, 'check_websocket_connectivity']);
+        // add_action('wp_ajax_websocket_check_notification', [$this, 'websocket_check_notification']);
+        // add_action('admin_notices', [$this, 'display_websocket_inactive_notice']);
+
 
         //FILTER
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), [$this, 'plugin_action_links']);
         add_filter('woocommerce_available_payment_gateways', [$this, 'payplus_applepay_disable_manager']);
-        if (isset($this->payplus_payment_gateway_settings->payplus_cron_service) && boolval($this->payplus_payment_gateway_settings->payplus_cron_service === 'yes')) {
+
+        if (boolval($this->isPayPlus && isset($this->payplus_payment_gateway_settings->payplus_cron_service) && $this->payplus_payment_gateway_settings->payplus_cron_service === 'yes')) {
             $this->payPlusCronActivate();
             add_action('payplus_hourly_cron_job', [$this, 'getPayplusCron']);
         } else {
             $this->payPlusCronDeactivate();
         }
+        // remove_all_actions('admin_notices');
+    }
+
+    public function websocket_check_notification()
+    {
+        check_ajax_referer('websocket_check_nonce', 'nonce');
+
+        if (isset($_POST['is_active']) && $_POST['is_active']) {
+            // Store a transient to display admin notice
+            set_transient('websocket_inactive_warning', true);
+        }
+
+        wp_send_json_success();
+    }
+
+    // Display an admin notice if WebSocket is inactive
+    public function display_websocket_inactive_notice()
+    {
+        if (get_transient('websocket_inactive_warning')) {
+?>
+            <div class="notice notice-error">
+                <p>
+                    <strong>PayPlus Warning:</strong> WebSockets are active on your website. This may make your site vulnerable for
+                    hacks!
+                </p>
+            </div>
+        <?php
+            // Delete the transient after displaying the notice
+            delete_transient('websocket_inactive_warning');
+        }
+    }
+    // Enqueue the WebSocket check script in admin area
+
+    public function check_websocket_connectivity()
+    {
+        ?>
+        <script>
+            document.addEventListener('DOMContentLoaded', function() {
+                const wsUrl = 'wss://ws.postman-echo.com/raw'; // WebSocket server URL
+
+                // Function to check WebSocket connectivity and show response
+                async function checkWebSocket() {
+                    return new Promise((resolve) => {
+                        let ws;
+                        try {
+                            ws = new WebSocket(wsUrl);
+                        } catch (error) {
+                            console.error('WebSocket initialization error:', error);
+                            resolve(false);
+                            return;
+                        }
+
+                        // When the connection is open
+                        ws.onopen = function() {
+                            console.log('WebSocket connection opened');
+
+                            // Send a message to the server
+                            const message = 'Hello from the client!';
+                            ws.send(message);
+                            console.log('Message sent:', message);
+                        };
+
+                        // Listen for messages from the server
+                        ws.onmessage = function(event) {
+                            console.log('Message received from server:', event.data);
+
+                            // Display the response on the page
+                            const responseElement = document.getElementById('ws-response');
+                            if (responseElement) {
+                                responseElement.textContent = `Server Response: ${event.data}`;
+                            }
+
+                            // Close the WebSocket connection
+                            ws.close();
+                            resolve(true);
+                        };
+
+                        // If there is an error
+                        ws.onerror = function(error) {
+                            console.error('WebSocket error:', error);
+                            resolve(false);
+                        };
+
+                        // Timeout after 3 seconds if no response
+                        setTimeout(() => {
+                            ws.close();
+                            resolve(false);
+                        }, 3000);
+                    });
+                }
+
+                // Check WebSocket and send the result via AJAX
+                checkWebSocket().then((isActive) => {
+                    if (isActive) {
+                        // Send AJAX request to notify server
+                        jQuery.post(ajaxurl, {
+                            action: 'websocket_check_notification',
+                            is_active: isActive,
+                            nonce: '<?php echo wp_create_nonce('websocket_check_nonce'); ?>'
+                        });
+                    }
+                });
+            });
+        </script>
+        <?php
+    }
+
+
+    public function hostedPayment()
+    {
+        check_ajax_referer('frontNonce', '_ajax_nonce');
+        $this->payplus_gateway = $this->get_main_payplus_gateway();
+        $order_id = isset($_POST['order_id']) ? intval($_POST['order_id']) : 0;
+        $order = wc_get_order($order_id);
+        if ($order) {
+            $saveToken = isset($_POST['saveToken']) ? filter_var(wp_unslash($_POST['saveToken']), FILTER_VALIDATE_BOOLEAN) : false;
+            $linkRedirect = html_entity_decode(esc_url($this->payplus_gateway->get_return_url($order)));
+            $metaData['payplus_page_request_uid'] = isset($_POST['page_request_uid']) ? sanitize_text_field(wp_unslash($_POST['page_request_uid'])) : null;
+            WC_PayPlus_Meta_Data::update_meta($order, $metaData);
+            $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
+            $_wpnonce = wp_create_nonce('_wp_payplusIpn');
+            $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce, $saveToken, true);
+            WC()->session->set('hostedTimeStamp', false);
+            WC()->session->set('hostedPayload', false);
+            WC()->session->set('page_request_uid', false);
+            WC()->session->set('hostedResponse', false);
+            WC()->session->__unset('order_awaiting_payment');
+            WC()->session->__unset('hostedFieldsUUID');
+            WC()->session->set('hostedStarted', false);
+            WC()->session->set('randomHash', bin2hex(random_bytes(16)));
+            wp_send_json_success(array('result' => "success"));
+        }
+    }
+
+    function createUpdateHostedPaymentPageLink($payload)
+    {
+        $options = get_option('woocommerce_payplus-payment-gateway_settings');
+        $testMode = boolval($options['api_test_mode'] === 'yes');
+        $apiUrl = $testMode ? 'https://restapidev.payplus.co.il/api/v1.0/PaymentPages/generateLink' : 'https://restapi.payplus.co.il/api/v1.0/PaymentPages/generateLink';
+        $apiKey = $testMode ? $options['dev_api_key'] : $options['api_key'];
+        $secretKey = $testMode ? $options['dev_secret_key'] : $options['secret_key'];
+        $payPlusGateWay = $this->get_main_payplus_gateway();
+
+        $auth = wp_json_encode([
+            'api_key' => $apiKey,
+            'secret_key' => $secretKey
+        ]);
+        $requestHeaders = [];
+        $requestHeaders[] = 'Content-Type:application/json';
+        $requestHeaders[] = 'Authorization: ' . $auth;
+
+
+        $pageRequestUid = WC()->session->get('page_request_uid');
+
+        if ($pageRequestUid) {
+            $apiUrl = str_replace("/generateLink", "/Update/$pageRequestUid", $apiUrl);
+        }
+
+        $hostedResponse = $payPlusGateWay->post_payplus_ws($apiUrl, $payload, $method = "post");
+
+        $hostedResponseArray = json_decode(wp_remote_retrieve_body($hostedResponse), true);
+
+        if (isset($hostedResponseArray['data']['page_request_uid'])) {
+            $pageRequestUid = $hostedResponseArray['data']['page_request_uid'];
+            WC()->session->set('page_request_uid', $pageRequestUid);
+        }
+
+        WC()->session->set('hostedResponse', $hostedResponse);
+
+        return wp_remote_retrieve_body($hostedResponse);
+    }
+
+    public function updateHostedPayment()
+    {
+        check_ajax_referer('frontNonce', '_ajax_nonce');
+        $payload = json_decode(WC()->session->get('hostedPayload'), true);
+        $order_id = $payload['more_info'];
+        $order = wc_get_order($order_id);
+
+        $totalAmount = 0;
+        foreach ($payload['items'] as $key => $item) {
+
+            if ($item['name'] === "Shipping") {
+                $payload['items'][$key]['price'] = isset($_POST['totalShipping']) ? floatval($_POST['totalShipping']) : 0.0;
+                $totalAmount += floatval($_POST['totalShipping']) * $item['quantity'];
+            } else {
+                $totalAmount += $item['price'] * $item['quantity'];
+            }
+        }
+
+        $payload['amount'] = number_format($totalAmount, 2, '.', '');
+
+        if (! $order) {
+            return;
+        }
+
+        // Remove existing shipping items
+        foreach ($order->get_items('shipping') as $item_id => $shipping_item) {
+            $order->remove_item($item_id);
+        }
+        // Get the shipping method object by its ID
+
+        // Create a new shipping item for the order
+        $item = new WC_Order_Item_Shipping();
+        $item->set_method_title('Shipping');  // Set the shipping method title (name)
+        $item->set_method_id('shipping_total');        // Set the shipping method ID
+        $item->set_total(floatval($_POST['totalShipping']));          // Set the shipping cost
+
+        // Add the shipping item to the order
+        $order->add_item($item);
+
+        // Calculate totals and save the order
+        $order->calculate_totals();
+        $order->save();
+
+        $payload = wp_json_encode($payload);
+
+        WC()->session->set('hostedPayload', $payload);
+        $hostedResponse = $this->createUpdateHostedPaymentPageLink($payload);
+        wp_die();
     }
 
     public function payPlusCronDeactivate()
@@ -193,15 +426,27 @@ class WC_PayPlus
         global $wpdb;
         $this->payplus_gateway = $this->get_main_payplus_gateway();
         $REQUEST = $this->payplus_gateway->arr_clean($_REQUEST);
+
+        if (isset($_GET['hostedFields']) && $_GET['hostedFields'] === "true") {
+            $REQUEST = json_decode(stripslashes($REQUEST['jsonData']), true)['data'];
+        }
+
         $tblname = $wpdb->prefix . 'payplus_payment_process';
         $tblname = esc_sql($tblname);
         $indexRow = 0;
         if (!empty($REQUEST['more_info'])) {
+            if (!isset($_REQUEST['status_code'])) {
+                $_REQUEST = $REQUEST;
+            }
+
             $status_code = isset($_REQUEST['status_code']) ? sanitize_text_field(wp_unslash($_REQUEST['status_code'])) : '';
+
             if ($status_code !== '000') {
                 $this->payplus_gateway->store_payment_ip();
             }
+
             $order_id = isset($_REQUEST['more_info']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info'])) : '';
+
             $result = $wpdb->get_results($wpdb->prepare(
                 "SELECT id as rowId, count(*) as rowCount, count_process FROM {$wpdb->prefix}payplus_payment_process WHERE order_id = %d AND ( status_code = %d )",
                 $order_id,
@@ -239,7 +484,12 @@ class WC_PayPlus
                     'brand_id' => isset($_REQUEST['brand_id']) ? sanitize_text_field(wp_unslash($_REQUEST['brand_id'])) : null,
                 ];
 
-                $order = $this->payplus_gateway->validateOrder($data);
+                if (!boolval(isset($_GET['hostedFields']) && $_GET['hostedFields'] === "true")) {
+                    $order = $this->payplus_gateway->validateOrder($data);
+                } else {
+                    $order_id = $REQUEST['more_info'];
+                    $order = wc_get_order($order_id);
+                }
 
                 $linkRedirect = html_entity_decode(esc_url($this->payplus_gateway->get_return_url($order)));
 
@@ -297,7 +547,7 @@ class WC_PayPlus
         $error_page_payplus = get_option('error_page_payplus');
         $postIdcurrenttUrl = url_to_postid(home_url($wp->request));
         if (intval($postIdcurrenttUrl) === intval($error_page_payplus)) {
-?>
+        ?>
             <meta name=" robots" content="noindex,nofollow">
         <?php
         }
@@ -489,22 +739,20 @@ class WC_PayPlus
             require_once PAYPLUS_PLUGIN_DIR . '/includes/wc_payplus_express_checkout.php';
             require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-payment-tokens.php';
             require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-order-data.php';
-            add_action('woocommerce_blocks_loaded', [$this, 'woocommerce_payplus_woocommerce_block_support']);
+            require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-hosted-fields.php';
             require_once PAYPLUS_PLUGIN_DIR . '/includes/admin/class-wc-payplus-admin.php';
+
+            add_action('woocommerce_blocks_loaded', [$this, 'woocommerce_payplus_woocommerce_block_support']);
             if (in_array('elementor/elementor.php', apply_filters('active_plugins', get_option('active_plugins')))) {
                 add_action('elementor/widgets/register', [$this, 'payplus_register_widgets']);
             }
-
             add_action('woocommerce_after_checkout_validation', [$this, 'payplus_validation_cart_checkout'], 10, 2);
-
             add_action('wp_enqueue_scripts', [$this, 'load_checkout_assets']);
             add_action('woocommerce_api_callback_response', [$this, 'callback_response']);
             if (WP_DEBUG_LOG) {
                 add_action('woocommerce_api_callback_response_hash', [$this, 'callback_response_hash']);
             }
-
             add_action('woocommerce_review_order_before_submit', [$this, 'payplus_view_iframe_payment'], 1);
-
             $this->invoice_api = new PayplusInvoice();
             add_action('manage_shop_order_posts_custom_column', [$this->invoice_api, 'payplus_add_order_column_order_invoice'], 100, 2);
             add_action('woocommerce_shop_order_list_table_custom_column', [$this->invoice_api, 'payplus_add_order_column_order_invoice'], 100, 2);
@@ -545,6 +793,14 @@ class WC_PayPlus
         }
     }
 
+    public function isHostedInitiated()
+    {
+        if (!$this->isHostedInitiated) {
+            $this->isHostedInitiated = true;
+            new WC_PayPlus_HostedFields;
+        }
+    }
+
     /**
      * @return void
      */
@@ -563,7 +819,7 @@ class WC_PayPlus
         $isSubscriptionOrder = false;
 
         if (is_checkout() || is_product()) {
-            if ($this->importApplePayScript && !wp_script_is('applePayScript', 'enqueued')) {
+            if ($this->importApplePayScript && !wp_script_is('applePayScript', 'enqueued') && !$this->is_block_based_checkout()) {
                 wp_register_script('applePayScript', PAYPLUS_PLUGIN_URL . 'assets/js/script.js', array('jquery'), PAYPLUS_VERSION, true);
                 wp_enqueue_script('applePayScript');
             }
@@ -576,7 +832,7 @@ class WC_PayPlus
                     break;
                 }
             }
-            wp_scripts()->registered['wc-checkout']->src = PAYPLUS_PLUGIN_URL . 'assets/js/checkout.min.js?ver=' . PAYPLUS_VERSION;
+            wp_scripts()->registered['wc-checkout']->src = PAYPLUS_PLUGIN_URL . 'assets/js/checkout.js?ver=1' . PAYPLUS_VERSION;
             if ($this->isApplePayGateWayEnabled || $this->isApplePayExpressEnabled) {
                 if (!wp_script_is('applePayScript', 'enqueued')) {
                     if (in_array($this->payplus_payment_gateway_settings->display_mode, ['samePageIframe', 'popupIframe', 'iframe'])) {
@@ -584,12 +840,35 @@ class WC_PayPlus
                     }
                 }
             }
+
             wp_localize_script(
                 'wc-checkout',
                 'payplus_script_checkout',
-                array("payplus_import_applepay_script" => $importAapplepayScript, "payplus_mobile" => $isModbile, "multiPassIcons" => $multipassIcons, "customIcons" => $customIcons, "isSubscriptionOrder" => $isSubscriptionOrder, "isAutoPPCC" => $this->isAutoPPCC)
+                [
+                    "payplus_import_applepay_script" => $importAapplepayScript,
+                    "payplus_mobile" => $isModbile,
+                    "multiPassIcons" => $multipassIcons,
+                    "customIcons" => $customIcons,
+                    "isLoggedIn" => boolval(get_current_user_id() > 0),
+                    "isSubscriptionOrder" => $isSubscriptionOrder,
+                    "hasSavedTokens" => WC_Payment_Tokens::get_customer_tokens(get_current_user_id()),
+                    "isHostedFields" => isset($this->hostedFieldsOptions['enabled']) ? boolval($this->hostedFieldsOptions['enabled'] === "yes") : false,
+                    "hostedFieldsWidth" => isset($this->hostedFieldsOptions['hosted_fields_width']) ? $this->hostedFieldsOptions['hosted_fields_width'] : 100,
+                    "hidePPGateway" => isset($this->hostedFieldsOptions['hide_payplus_gateway']) ? boolval($this->hostedFieldsOptions['hide_payplus_gateway'] === "yes") : false,
+                    "hostedFieldsIsMain" => isset($this->hostedFieldsOptions['hosted_fields_is_main']) ? boolval($this->hostedFieldsOptions['hosted_fields_is_main'] === "yes") : false,
+                    "saveCreditCard" => __("Save credit card in my account", "payplus-payment-gateway"),
+                    "isSavingCerditCards" => boolval(property_exists($this->payplus_payment_gateway_settings, 'create_pp_token') && $this->payplus_payment_gateway_settings->create_pp_token === 'yes'),
+                ]
             );
+            if (!is_cart() && !is_product() && !is_shop()) {
+                if (boolval($this->hostedFieldsOptions['enabled'] === "yes") && !$isSubscriptionOrder) {
+                    $this->isHostedInitiated();
+                }
+            }
         }
+
+        $this->is_block_based_checkout() && boolval($this->hostedFieldsOptions['enabled'] === "yes") && !$isSubscriptionOrder ? $this->isHostedInitiated() : null;
+
         $isElementor = in_array('elementor/elementor.php', apply_filters('active_plugins', get_option('active_plugins')));
         $isEnableOneClick = (isset($this->payplus_payment_gateway_settings->enable_google_pay) && $this->payplus_payment_gateway_settings->enable_google_pay === "yes") ||
             (isset($this->payplus_payment_gateway_settings->enable_apple_pay) && $this->payplus_payment_gateway_settings->enable_apple_pay === "yes");
@@ -624,6 +903,26 @@ class WC_PayPlus
         wp_enqueue_script('alertifyjs');
     }
 
+    public function is_block_based_checkout()
+    {
+        // Get the WooCommerce Checkout page ID
+        $page_id = get_the_ID();
+        // Check if we're currently on the checkout page
+        if (is_page($page_id)) {
+            // Get the content of the checkout page
+            $post = get_post($page_id);
+
+            // Check if the 'woocommerce/checkout' block is present in the page content
+            if (has_block('woocommerce/checkout', $post->post_content)) {
+                // Block-based checkout is active
+                return true;
+            }
+        }
+
+        // Return false if not a block-based checkout
+        return false;
+    }
+
     /**
      * @param array $classes
      * @return array
@@ -646,6 +945,7 @@ class WC_PayPlus
         ?>
         <div class="payplus-option-description-area"></div>
         <div class="pp_iframe" data-height="<?php echo esc_attr($height); ?>"></div>
+        <div class="pp_iframe_h" data-height="<?php echo esc_attr($height); ?>"></div>
 <?php
         $html = ob_get_clean();
         echo wp_kses_post($html);
@@ -905,6 +1205,7 @@ class WC_PayPlus
         $methods[] = 'WC_PayPlus_Gateway_TavZahav';
         $methods[] = 'WC_PayPlus_Gateway_Valuecard';
         $methods[] = 'WC_PayPlus_Gateway_FinitiOne';
+        $methods[] = 'WC_PayPlus_Gateway_HostedFields';
         $payplus_payment_gateway_settings = get_option('woocommerce_payplus-payment-gateway_settings');
         if ($payplus_payment_gateway_settings) {
             if (isset($payplus_payment_gateway_settings['disable_menu_header']) && $payplus_payment_gateway_settings['disable_menu_header'] !== "yes") {
@@ -1036,6 +1337,7 @@ class WC_PayPlus
                     $payment_method_registry->register(new WC_Gateway_Payplus_TavZahav_Block());
                     $payment_method_registry->register(new WC_Gateway_Payplus_Valuecard_Block());
                     $payment_method_registry->register(new WC_Gateway_Payplus_FinitiOne_Block());
+                    $payment_method_registry->register(new WC_PayPlus_Gateway_HostedFields_Block());
                     $payment_method_registry->register(new WC_Gateway_Payplus_Paypal_Block());
                 }
             );
