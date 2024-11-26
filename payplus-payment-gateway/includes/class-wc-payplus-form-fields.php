@@ -237,7 +237,7 @@ class WC_PayPlus_Form_Fields
                 'title' => __('Transactions Type', 'payplus-payment-gateway'),
                 'type' => 'select',
                 'options' => [
-                    '0' => __('Payment Page Default Setting', 'payplus-payment-gateway'),
+                    '0' => __('Use global default', 'payplus-payment-gateway'),
                     '1' => __('Charge', 'payplus-payment-gateway'),
                     '2' => __('Authorization', 'payplus-payment-gateway'),
                 ],
@@ -337,7 +337,7 @@ class WC_PayPlus_Form_Fields
                 'title' => __('Hide ID Field In Payment Page', 'payplus-payment-gateway'),
                 'type' => 'select',
                 'options' => [
-                    '0' => __('Payment Page Default Setting', 'payplus-payment-gateway'),
+                    '0' => __('Use global default', 'payplus-payment-gateway'),
                     '1' => __('Yes', 'payplus-payment-gateway'),
                     '2' => __('No', 'payplus-payment-gateway'),
                 ],
@@ -349,7 +349,7 @@ class WC_PayPlus_Form_Fields
                 'title' => __('Hide Number Of Payments In Payment Page', 'payplus-payment-gateway'),
                 'type' => 'select',
                 'options' => [
-                    '0' => __('Payment Page Default Setting', 'payplus-payment-gateway'),
+                    '0' => __('Use global default', 'payplus-payment-gateway'),
                     '1' => __('Yes', 'payplus-payment-gateway'),
                     '2' => __('No', 'payplus-payment-gateway'),
                 ],
@@ -414,7 +414,7 @@ class WC_PayPlus_Form_Fields
             'callback_addr' => [
                 'title' => __('Callback url', 'payplus-payment-gateway'),
                 'type' => 'url',
-                'description' => __('To receive transaction information you need a web address', 'payplus-payment-gateway'),
+                'description' => __('To receive transaction information you need a web address<br>(Only http:// or https:// links are applicable)', 'payplus-payment-gateway'),
                 'default' => '',
             ],
             'send_products' => [
