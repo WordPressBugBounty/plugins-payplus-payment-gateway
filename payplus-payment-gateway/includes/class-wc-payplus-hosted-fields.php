@@ -79,6 +79,9 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
             $script_version = filemtime(plugin_dir_path(__DIR__) . 'assets/js/hostedFieldsScript.min.js');
             $template_path = plugin_dir_path(__DIR__) . 'templates/hostedFields.php';
 
+            require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-error-handler.php';
+            $payPlusErrors = new WCPayplusErrorCodes();
+
             if (file_exists($template_path)) {
                 wp_enqueue_style('hosted-css', PAYPLUS_PLUGIN_URL . 'assets/css/hostedFields.css', [], $script_version);
                 include $template_path;
@@ -96,6 +99,7 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
                     'ajax_url' => admin_url('admin-ajax.php'),
                     "saveCreditCard" => __("Save credit card in my account", "payplus-payment-gateway"),
                     'testMode' => $this->testMode,
+                    'allErrors' => $payPlusErrors->getAllTranslations(),
                     'frontNonce' => wp_create_nonce('frontNonce'),
                     'payPlusLogo' => PAYPLUS_PLUGIN_URL . 'assets/images/PayPlusLogo.svg',
                 ]
@@ -129,54 +133,11 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         }
     }
 
-    public function createUpdateHostedPaymentPageLink($payload)
+    public function updateOrderId($randomHash)
     {
-        $testMode = boolval($this->payPlusGateway->settings['api_test_mode'] === 'yes');
-        $apiUrl = $testMode ? 'https://restapidev.payplus.co.il/api/v1.0/PaymentPages/generateLink' : 'https://restapi.payplus.co.il/api/v1.0/PaymentPages/generateLink';
-        $apiKey = $testMode ? $this->payPlusGateway->settings['dev_api_key'] : $this->payPlusGateway->settings['api_key'];
-        $secretKey = $testMode ? $this->payPlusGateway->settings['dev_secret_key'] : $this->payPlusGateway->settings['secret_key'];
-
-
-        $auth = wp_json_encode([
-            'api_key' => $apiKey,
-            'secret_key' => $secretKey
-        ]);
-        $requestHeaders = [];
-        $requestHeaders[] = 'Content-Type:application/json';
-        $requestHeaders[] = 'Authorization: ' . $auth;
-
-
-        $pageRequestUid = WC()->session->get('page_request_uid');
-        $hostedFieldsUUID = WC()->session->get('hostedFieldsUUID');
-
-        if ($pageRequestUid && $hostedFieldsUUID) {
-            $apiUrl = str_replace("/generateLink", "/Update/$pageRequestUid", $apiUrl);
-        }
-
-        $hostedResponse = $this->payPlusGateway->post_payplus_ws($apiUrl, $payload, "post");
-
-        $hostedResponseArray = json_decode(wp_remote_retrieve_body($hostedResponse), true);
-
-        if (isset($hostedResponseArray['data']['page_request_uid'])) {
-            $pageRequestUid = $hostedResponseArray['data']['page_request_uid'];
-            WC()->session->set('page_request_uid', $pageRequestUid);
-        }
-
-        $body = wp_remote_retrieve_body($hostedResponse);
-        $bodyArray = json_decode($body, true);
-
-        if (isset($bodyArray['data']['hosted_fields_uuid']) && $bodyArray['data']['hosted_fields_uuid'] !== null) {
-            $hostedFieldsUUID = $bodyArray['data']['hosted_fields_uuid'];
-            WC()->session->set('hostedFieldsUUID', $hostedFieldsUUID);
-        } else {
-
-            $bodyArray['data']['hosted_fields_uuid'] = $hostedFieldsUUID;
-        }
-        $hostedResponse = wp_json_encode($bodyArray);
-        // WC()->session->set('hostedStarted', true);
-        WC()->session->set('hostedResponse', $hostedResponse);
-
-        return $hostedResponse;
+        WC()->session->set('order_awaiting_payment', $randomHash);
+        $order_id = $randomHash;
+        return $order_id;
     }
 
     public function hostedFieldsData($order_id)
@@ -267,7 +228,6 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $data->create_token = true;
         $data->currency_code = get_woocommerce_currency();
         $data->charge_method = intval($this->payPlusGateway->settings['transaction_type']);
-
         /**
          * Origin domain is the domain of the page that is requesting the payment page.
          * This is necessary for the hosted fields to be able to communicate with the client website.
@@ -290,6 +250,13 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
             $data->customer->postal_code = $customer['postal_code'];
             $data->customer->country_iso = $customer['country_iso'];
             $data->customer->customer_external_number = $order->get_customer_id();
+            $payingVat = isset($this->payPlusGateway->settings['paying_vat']) && in_array($this->payPlusGateway->settings['paying_vat'], [0, 1, 2]) ? $this->payPlusGateway->settings['paying_vat'] : false;
+            if ($payingVat) {
+                $payingVat = $payingVat === "0" ? true : false;
+                $payingVat = $payingVat === "1" ? false : true;
+                $payingVat = $payingVat === "2" ? ($customer['country_iso'] !== trim(strtolower($this->payPlusGateway->settings['paying_vat_iso_code'])) ? false : true) : $payingVat;
+                $data->paying_vat = $payingVat;
+            }
         } else {
             $data->customer = new stdClass();
             $data->customer->customer_name = "$billing_first_name $billing_last_name";
@@ -310,14 +277,7 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $randomHash = WC()->session->get('randomHash') ? WC()->session->get('randomHash') : bin2hex(random_bytes(16));
         WC()->session->set('randomHash', $randomHash);
 
-        function updateOrderId($randomHash)
-        {
-            WC()->session->set('order_awaiting_payment', $randomHash);
-            $order_id = $randomHash;
-            return $order_id;
-        }
-
-        $order_id = $order_id === "000" ? updateOrderId($randomHash) : $order_id;
+        $order_id = $order_id === "000" ? $this->updateOrderId($randomHash) : $order_id;
         $data->more_info = $order_id;
 
         $shippingPrice = 0;
@@ -386,7 +346,7 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         }
 
         $hostedResponse = WC()->session->get('hostedPayload');
-        $hostedResponseArray = json_decode($hostedResponse, true);
+        $hostedResponseArray = !empty($hostedResponse) ? json_decode($hostedResponse, true) : '{}';
 
         $data->amount = number_format($totalAmount, 2, '.', '');
         $firstMessage = $order_id === "000" ? "-=#* 1st field generated *%=- - " : "";
@@ -403,13 +363,13 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
 
         WC()->session->set('hostedPayload', $payload);
 
-        $hostedResponse = $this->createUpdateHostedPaymentPageLink($payload);
+        $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload);
 
         $hostedResponseArray = json_decode($hostedResponse, true);
 
         if ($hostedResponseArray['results']['status'] === "error") {
             WC()->session->set('page_request_uid', false);
-            $hostedResponse = $this->createUpdateHostedPaymentPageLink($payload);
+            $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload);
         }
 
         return $hostedResponse;

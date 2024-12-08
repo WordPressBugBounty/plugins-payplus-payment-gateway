@@ -6,10 +6,11 @@ $locale = get_locale();
 $rowDirection = $locale !== "he_IL" ? "row" : "row-reverse";
 $direction = $locale !== "he_IL" ? "right" : "left";
 $opposite = $locale !== "he_IL" ?  "left" : "right";
-$hostedIcons = WC_PayPlus_Statics::getHostedIcons();
+$cssDirection = $locale !== "he_IL" ?  "ltr" : "rtl";
+$cssOpposite = $locale !== "he_IL" ?  "rtl" : "ltr";
+$hostedIcons = WC_PayPlus_Statics::getCardsLogos();
 $numPaymentsAllowed = $this->payplus_gateway->hostedFieldsOptions['hosted_fields_payments_amount'];
 $numPaymentsAllowed = max(1, min($numPaymentsAllowed, 99)); // Enforce max 99 and min 1
-
 
 ?>
 <!DOCTYPE html>
@@ -360,6 +361,99 @@ $numPaymentsAllowed = max(1, min($numPaymentsAllowed, 99)); // Enforce max 99 an
                     }
                 }
             }
+
+            .payment-error-message {
+                display: none;
+                align-items: center;
+                justify-content: space-between;
+                direction: <?php echo esc_attr($cssOpposite);
+                            ?>;
+                /* background-color: #ffe6e6; */
+                /* Light red background */
+                color: #FF3366;
+                /* Dark red text */
+                padding: 10px;
+                border-radius: 5px;
+                width: 90%;
+                margin: 10px auto;
+                animation: fadeOut 5s forwards;
+            }
+
+            .loader-container {
+                position: relative;
+                width: 30px;
+                height: 30px;
+            }
+
+
+            .loader-countdown {
+                position: absolute;
+                top: 53%;
+
+                left: <?php if ($locale !== "he_IL") {
+                            echo "47%";
+                        } else {
+                            echo "49.5%";
+                        }
+
+                        ?>;
+
+                transform: translate(-50%, -50%);
+                font-size: 14px;
+                font-weight: bold;
+                color: #FF3366;
+            }
+
+            .progress-ring {
+                transform: rotate(-90deg);
+                /* Start from the top */
+                position: absolute;
+                top: 0;
+                left: 0;
+            }
+
+            .progress-ring__circle {
+                fill: transparent;
+                stroke: #FF3366;
+                stroke-width: 2;
+                stroke-dasharray: 81.68;
+                /* Full circumference of the circle (2 * π * r where r=13) */
+                stroke-dashoffset: 0;
+                transition: stroke-dashoffset 1s linear;
+                /* Smooth drain effect */
+            }
+
+
+            .error-details {
+                width: 80%;
+
+                p {
+                    font-size: 14px;
+                    line-height: 18px;
+                    text-align: <?php echo esc_attr($opposite);
+                                ?>;
+                }
+            }
+
+            .error-message,
+            .error-code {
+                margin: 0;
+                direction: <?php echo esc_attr($cssDirection);
+                            ?>;
+            }
+
+            /* Fade-out animation for the entire div */
+            @keyframes fadeOut {
+                0% {
+                    opacity: 1;
+                }
+
+                100% {
+                    opacity: 0;
+                    display: none;
+                }
+            }
+
         }
 
         input[type="text" i] {
@@ -491,13 +585,14 @@ $numPaymentsAllowed = max(1, min($numPaymentsAllowed, 99)); // Enforce max 99 an
                             <?php
                             if (is_array($hostedIcons) && !empty($hostedIcons)) {
                                 foreach ($hostedIcons as $hIcon) {
-                            ?><img class="hf-image" style="height:19px" src="<?php echo esc_url($hIcon); ?>" alt="<?php echo esc_attr($ccImageAltText); ?>" /><?php
-                                                                                                                                                            }
-                                                                                                                                                        } else {
-                                                                                                                                                                ?><img class="hf-image" src="<?php echo esc_url($ccImage); ?>"
-                                    alt="<?php echo esc_attr($ccImageAltText); ?>" /><?php
-                                                                                                                                                        }
-                                                                                        ?>
+                            ?><img class="hf-image" style="height:19px" src="<?php echo esc_url($hIcon); ?>"
+                                        alt="<?php echo esc_attr($ccImageAltText); ?>" /><?php
+                                                                                        }
+                                                                                    } else {
+                                                                                            ?><img class="hf-image"
+                                    src="<?php echo esc_url($ccImage); ?>" alt="<?php echo esc_attr($ccImageAltText); ?>" /><?php
+                                                                                                                        }
+                                                                                                                            ?>
 
                         </div>
                     </div>
@@ -570,6 +665,21 @@ $numPaymentsAllowed = max(1, min($numPaymentsAllowed, 99)); // Enforce max 99 an
                     <input type="button" value="<?php echo esc_attr__('Place Order', 'payplus-payment-gateway'); ?>"
                         id="submit-payment" class="btn btn-primary" />
                     <br />
+                    <div class="payment-error-message">
+                        <div class="loader-container">
+                            <svg class="progress-ring" width="30" height="30">
+                                <circle class="progress-ring__circle" cx="15" cy="15" r="13"></circle>
+                            </svg>
+                            <span class="loader-countdown">5</span>
+                        </div>
+                        <div class="error-details">
+                            <p class="error-message"></p>
+                            <p class="error-code"></p>
+                        </div>
+                        <img
+                            src="<?php echo esc_url(site_url() . '/wp-content/plugins/payplus-payment-gateway/assets/images/exclamation.svg'); ?>" />
+                    </div>
+
                     <div id="ppLogo">
                         <?php echo esc_html__('Powered by ', 'payplus-payment-gateway'); ?>
                         <img class="hf-image"

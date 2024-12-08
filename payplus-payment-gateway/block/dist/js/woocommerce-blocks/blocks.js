@@ -51,11 +51,10 @@ if (isCheckout || hasOrder) {
     let customIcons = [];
 
     const w = window.React;
-
     for (let c = 0; c < payPlusGateWay.customIcons?.length; c++) {
         customIcons[c] = (0, w.createElement)("img", {
             src: payPlusGateWay.customIcons[c],
-            style: { maxHeight: "65px", height: "45px" },
+            style: { maxHeight: "35px", height: "45px" },
         });
     }
 
@@ -213,20 +212,73 @@ if (isCheckout || hasOrder) {
             payPlusCC = document.querySelector(
                 "#radio-control-wc-payment-method-options-payplus-payment-gateway"
             );
-            // if (payPlusGateWay.isAutoPPCC && autoPPCCrun) {
-            //     console.log("autorun: ", autoPPCCrun);
-            //     autoPPCC(overlay, loader, payPlusCC);
-            //     autoPPCCrun = false;
-            // }
-            const observer = new MutationObserver((mutationsList, observer) => {
-                // if (loopImages) {
-                //   multiPassIcons(loopImages, element);
-                // }
-                // if (payPlusGateWay.isAutoPPCC && autoPPCCrun) {
-                //     autoPPCC(overlay, loader, payPlusCC);
-                //     autoPPCCrun = false;
-                // }
 
+            const observer = new MutationObserver((mutationsList, observer) => {
+                if (store.hasError()) {
+                    try {
+                        let getPaymentResult = payment.getPaymentResult();
+
+                        if (
+                            getPaymentResult === null ||
+                            getPaymentResult === undefined ||
+                            getPaymentResult === ""
+                        ) {
+                            throw new Error(
+                                "Payment result is empty, null, or undefined."
+                            );
+                        }
+
+                        // Process the result here
+                        console.log("Payment result:", getPaymentResult);
+                        let pp_iframe =
+                            document.querySelectorAll(".pp_iframe")[0];
+                        pp_iframe.style.width =
+                            window.innerWidth <= 768 ? "95%" : "55%";
+                        pp_iframe.style.height = "200px";
+                        pp_iframe.style.position = "fixed";
+                        pp_iframe.style.backgroundColor = "white";
+                        pp_iframe.style.display = "flex";
+                        pp_iframe.style.alignItems = "center";
+                        pp_iframe.style.textAlign = "center";
+                        pp_iframe.style.justifyContent = "center";
+                        pp_iframe.style.top = "50%";
+                        pp_iframe.style.left = "50%";
+                        pp_iframe.style.transform = "translate(-50%, -50%)";
+                        pp_iframe.style.zIndex = 100000;
+                        pp_iframe.style.boxShadow = "10px 10px 10px 10px grey";
+                        pp_iframe.style.borderRadius = "25px";
+                        pp_iframe.innerHTML =
+                            getPaymentResult.paymentDetails.errorMessage !==
+                            undefined
+                                ? getPaymentResult.paymentDetails.errorMessage +
+                                  "<br>" +
+                                  "Click this to close."
+                                : getPaymentResult.message +
+                                  "<br>" +
+                                  "Click this to close.";
+                        pp_iframe.addEventListener("click", (e) => {
+                            e.preventDefault();
+                            pp_iframe.style.display = "none";
+                            location.reload();
+                        });
+                        console.log(
+                            getPaymentResult.paymentDetails.errorMessage
+                        );
+                        if (
+                            getPaymentResult.paymentDetails.errorMessage !==
+                            undefined
+                        ) {
+                            alert(getPaymentResult.paymentDetails.errorMessage);
+                        } else {
+                            alert(getPaymentResult.message);
+                        }
+
+                        observer.disconnect();
+                    } catch (error) {
+                        // Handle the error here
+                        console.error("An error occurred:", error.message);
+                    }
+                }
                 if (store.isComplete()) {
                     observer.disconnect();
                     const activePaymentMethod =
@@ -305,74 +357,6 @@ if (isCheckout || hasOrder) {
                                 }
                             }
                             observer.disconnect();
-                        }
-                    } else if (store.hasError()) {
-                        try {
-                            let getPaymentResult = payment.getPaymentResult();
-
-                            if (
-                                getPaymentResult === null ||
-                                getPaymentResult === undefined ||
-                                getPaymentResult === ""
-                            ) {
-                                throw new Error(
-                                    "Payment result is empty, null, or undefined."
-                                );
-                            }
-
-                            // Process the result here
-                            console.log("Payment result:", getPaymentResult);
-                            let pp_iframe =
-                                document.querySelectorAll(".pp_iframe")[0];
-                            pp_iframe.style.width =
-                                window.innerWidth <= 768 ? "95%" : "55%";
-                            pp_iframe.style.height = "200px";
-                            pp_iframe.style.position = "fixed";
-                            pp_iframe.style.backgroundColor = "white";
-                            pp_iframe.style.display = "flex";
-                            pp_iframe.style.alignItems = "center";
-                            pp_iframe.style.textAlign = "center";
-                            pp_iframe.style.justifyContent = "center";
-                            pp_iframe.style.top = "50%";
-                            pp_iframe.style.left = "50%";
-                            pp_iframe.style.transform = "translate(-50%, -50%)";
-                            pp_iframe.style.zIndex = 100000;
-                            pp_iframe.style.boxShadow =
-                                "10px 10px 10px 10px grey";
-                            pp_iframe.style.borderRadius = "25px";
-                            pp_iframe.innerHTML =
-                                getPaymentResult.paymentDetails.errorMessage !==
-                                undefined
-                                    ? getPaymentResult.paymentDetails
-                                          .errorMessage +
-                                      "<br>" +
-                                      "Click this to close."
-                                    : getPaymentResult.message +
-                                      "<br>" +
-                                      "Click this to close.";
-                            pp_iframe.addEventListener("click", (e) => {
-                                e.preventDefault();
-                                pp_iframe.style.display = "none";
-                                location.reload();
-                            });
-                            console.log(
-                                getPaymentResult.paymentDetails.errorMessage
-                            );
-                            if (
-                                getPaymentResult.paymentDetails.errorMessage !==
-                                undefined
-                            ) {
-                                alert(
-                                    getPaymentResult.paymentDetails.errorMessage
-                                );
-                            } else {
-                                alert(getPaymentResult.message);
-                            }
-
-                            observer.disconnect();
-                        } catch (error) {
-                            // Handle the error here
-                            console.error("An error occurred:", error.message);
                         }
                     }
                 }

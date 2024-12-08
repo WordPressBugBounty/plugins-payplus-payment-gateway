@@ -63,15 +63,7 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
         $this->applePaySettings = get_option('woocommerce_payplus-payment-gateway-applepay_settings');
         $this->importApplePayScript = boolval(boolval(isset($this->payPlusSettings['enable_apple_pay']) && $this->payPlusSettings['enable_apple_pay'] === 'yes') || boolval(isset($this->applePaySettings['enabled']) && $this->applePaySettings['enabled'] === "yes"));
         $this->isAutoPPCC = boolval(isset($this->settings['auto_load_payplus_cc_method']) && $this->settings['auto_load_payplus_cc_method'] === 'yes');
-
-
-        if (isset($this->settings['custom_icons']) && strlen($this->settings['custom_icons']) > 0) {
-            $this->customIcons = explode(";", $this->settings['custom_icons']);
-        } else {
-            $this->customIcons = [];
-        }
-
-
+        $this->customIcons = array_values(WC_PayPlus_Statics::getCardsLogos());
         $this->secretKey = $this->settings['secret_key'] ?? null;
         $gateways = WC()->payment_gateways->payment_gateways();
 
@@ -99,42 +91,6 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
         $this->payplus_gateway = new WC_PayPlus_Gateway();
         return $this->payplus_gateway;
     }
-
-    public function createUpdateHostedPaymentPageLink($payload)
-    {
-        $options = get_option('woocommerce_payplus-payment-gateway_settings');
-        $testMode = boolval($options['api_test_mode'] === 'yes');
-        $apiUrl = $testMode ? 'https://restapidev.payplus.co.il/api/v1.0/PaymentPages/generateLink' : 'https://restapi.payplus.co.il/api/v1.0/PaymentPages/generateLink';
-        $apiKey = $testMode ? $options['dev_api_key'] : $options['api_key'];
-        $secretKey = $testMode ? $options['dev_secret_key'] : $options['secret_key'];
-        $payPlusGateWay = $this->get_main_payplus_gateway();
-
-        $auth = wp_json_encode([
-            'api_key' => $apiKey,
-            'secret_key' => $secretKey
-        ]);
-        $requestHeaders = [];
-        $requestHeaders[] = 'Content-Type:application/json';
-        $requestHeaders[] = 'Authorization: ' . $auth;
-
-
-        $pageRequestUid = WC()->session->get('page_request_uid');
-
-        if ($pageRequestUid) {
-            $apiUrl = str_replace("/generateLink", "/Update/$pageRequestUid", $apiUrl);
-        }
-
-        $hostedResponse = $payPlusGateWay->post_payplus_ws($apiUrl, $payload, "post");
-
-        $hostedResponseArray = json_decode(wp_remote_retrieve_body($hostedResponse), true);
-
-        if (isset($hostedResponseArray['data']['page_request_uid'])) {
-            $pageRequestUid = $hostedResponseArray['data']['page_request_uid'];
-        }
-
-        return wp_remote_retrieve_body($hostedResponse);
-    }
-
 
     public function hostedFieldsData($order_id)
     {
@@ -253,6 +209,13 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
             $data->customer->postal_code = $customer['postal_code'];
             $data->customer->country_iso = $customer['country_iso'];
             $data->customer->customer_external_number = $order->get_customer_id();
+            $payingVat = isset($options['paying_vat']) && in_array($options['paying_vat'], [0, 1, 2]) ? $options['paying_vat'] : false;
+            if ($payingVat) {
+                $payingVat = $payingVat === "0" ? true : false;
+                $payingVat = $payingVat === "1" ? false : true;
+                $payingVat = $payingVat === "2" ? ($customer['country_iso'] !== trim(strtolower($options['paying_vat_iso_code'])) ? false : true) : $payingVat;
+                $data->paying_vat = $payingVat;
+            }
         } else {
             $data->customer = new stdClass();
             $data->customer->customer_name = "$billing_first_name $billing_last_name";
@@ -351,13 +314,13 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
 
         WC()->session->set('hostedPayload', $payload);
 
-        $hostedResponse = $this->createUpdateHostedPaymentPageLink($payload);
+        $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload);
 
         $hostedResponseArray = json_decode($hostedResponse, true);
 
         if ($hostedResponseArray['results']['status'] === "error") {
             WC()->session->__unset('page_request_uid');
-            $hostedResponse = $this->createUpdateHostedPaymentPageLink($payload);
+            $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload);
         }
 
         return $hostedResponse;
@@ -472,7 +435,7 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
 
             $payload = $main_gateway->generatePayloadLink($this->orderId, is_admin(), null, $subscription = false, $custom_more_info = '', $move_token = false, ['chargeDefault' => $chargeDefault, 'hideOtherPayments' => $hideOtherPayments, 'isSubscriptionOrder' => $this->isSubscriptionOrder]);
             WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload' => $payload]);
-            $response = $main_gateway->post_payplus_ws($main_gateway->payment_url, $payload);
+            $response = WC_PayPlus_Statics::payPlusRemote($main_gateway->payment_url, $payload);
 
             $payment_details = $result->payment_details;
             $payment_details['order_id'] = $this->orderId;
@@ -519,7 +482,7 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
      */
     public function get_payment_method_script_handles()
     {
-        $script_path = '/block/dist/js/woocommerce-blocks/blocks.js';
+        $script_path = '/block/dist/js/woocommerce-blocks/blocks.min.js';
         $style_path = 'block/dist/css/woocommerce-blocks/style.css'; // Add path to your CSS file
 
         $script_asset = array(

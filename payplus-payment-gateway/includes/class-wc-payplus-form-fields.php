@@ -271,13 +271,6 @@ class WC_PayPlus_Form_Fields
                 'desc_tip' => true,
                 'label' => __('Change icon layout on checkout page.', 'payplus-payment-gateway'),
             ],
-            'custom_icons' => [
-                'title' => __('Custom Checkout Icons', 'payplus-payment-gateway'),
-                'type' => 'textarea',
-                'default' => '',
-                'description' => __('Paste images urls here divided by ; (Semicolon) to show under payment method label side beside side.', 'payplus-payment-gateway'),
-                'desc_tip' => true,
-            ],
             'create_pp_token' => [
                 'title' => __('Saved Credit Cards', 'payplus-payment-gateway'),
                 'type' => 'checkbox',
@@ -484,7 +477,8 @@ class WC_PayPlus_Form_Fields
                 'label' => __('Enable PayPlus orders cron service.', 'payplus-payment-gateway'),
                 'type' => 'checkbox',
                 'default' => 'no',
-                'description' => __('This checks all orders created within the last 2 hours and are in "pending" status and verifies the PayPlus IPN Process.', 'payplus-payment-gateway'),
+                'description' => __('PayPlus cron processes "cancelled" or "pending" orders that are over 30 minutes old, created today, have a payment_page_uid, and do not have the cron test flag (to avoid retesting already tested orders).
+Orders that were successful and cancelled manually will not be tested or updated via cron.', 'payplus-payment-gateway'),
                 'desc_tip' => true,
             ],
             'payplus_orders_check_button' => [
@@ -492,7 +486,7 @@ class WC_PayPlus_Form_Fields
                 'label' => __('Show PayPlus "Orders Check Button" on the side menu.', 'payplus-payment-gateway'),
                 'type' => 'checkbox',
                 'default' => 'no',
-                'description' => __('The "PayPlus Orders Check" button checks all orders created within the last day are in "pending" status and contain "payplus_page_request_uid". It verifies the PayPlus IPN Process and sets the correct status if needded.', 'payplus-payment-gateway'),
+                'description' => __('The "PayPlus Orders Check" button checks all orders created within the last day are in "pending" status or "cancelled" and contain "payplus_page_request_uid". It verifies the PayPlus IPN Process and sets the correct status if needded.', 'payplus-payment-gateway'),
                 'desc_tip' => true,
             ],
             'payplus_show_sub_gateways_side_menu' => [

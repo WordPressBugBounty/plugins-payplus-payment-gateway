@@ -129,6 +129,95 @@ function putHostedFields() {
     }
 }
 
+function showElement(element, display) {
+    element.style.display = display; // Set display to block
+    element.style.opacity = "1"; // Fully visible
+    element.style.transition = "opacity 1s"; // Slow transition (1 second)
+    setTimeout(() => {
+        element.style.opacity = "1"; // Fade in
+    }, 10); // Small delay to ensure the transition applies
+}
+
+function hideElement(element) {
+    element.style.opacity = "0"; // Fade out
+    element.style.transition = "opacity 1s"; // Slow transition (1 second)
+    setTimeout(() => {
+        element.style.display = "none"; // Hide after fade-out
+    }, 1000); // Match the transition duration (1s = 1000ms)
+}
+
+function showError(message, code) {
+    const errorMessageDiv = document.querySelector(".payment-error-message");
+    const loaderCountdown = document.querySelector(".loader-countdown");
+    const circle = document.querySelector(".progress-ring__circle");
+    const errorMessage = document.querySelector(".error-message");
+    const errorCode = document.querySelector(".error-code");
+    let countdown = 5;
+    loaderCountdown.textContent = countdown;
+
+    message =
+        payplus_script_hosted.allErrors.Errors[message] != null
+            ? payplus_script_hosted.allErrors.Errors[message]
+            : message;
+    code =
+        payplus_script_hosted.allErrors.Fields[code] != null
+            ? payplus_script_hosted.allErrors.Fields[code]
+            : code;
+
+    showElement(errorMessageDiv, "flex");
+
+    let errorCodePrefix;
+    let errorMessagePrefix = pageLang !== "en-US" ? "שגיאה: " : "Error: ";
+    errorMessage.innerText = errorMessagePrefix + message;
+
+    if (typeof code !== "string") {
+        errorCodePrefix = pageLang !== "en-US" ? "קוד שגיאה: " : "Error code: ";
+    } else {
+        errorCodePrefix = pageLang !== "en-US" ? "שדה: " : "Field: ";
+    }
+
+    code !== null
+        ? (errorCode.innerText =
+              code.toString().length > 0 ? errorCodePrefix + code : code)
+        : null;
+
+    const isCheckout = !document.querySelector(
+        'div[data-block-name="woocommerce/checkout"]'
+    )
+        ? false
+        : true;
+    isCheckout
+        ? alert(errorMessage.innerText + "\n" + errorCode.innerText)
+        : null;
+    const radius = circle.r.baseVal.value;
+    const circumference = 2 * Math.PI * radius;
+
+    // Set circle circumference
+    circle.style.strokeDasharray = `${circumference}`;
+    circle.style.strokeDashoffset = "0";
+
+    const updateLoader = () => {
+        // Update countdown number
+        loaderCountdown.textContent = countdown;
+
+        // Calculate stroke-dashoffset for the "drain" effect
+        const offset = circumference - (countdown / 5) * circumference + 15;
+        circle.style.strokeDashoffset = offset;
+
+        // If countdown is complete, hide the error message
+        if (countdown === 1) {
+            clearInterval(timer);
+            // errorMessageDiv.style.display = "none";
+            hideElement(errorMessageDiv);
+        } else {
+            countdown--;
+        }
+    };
+
+    // Start the countdown
+    const timer = setInterval(updateLoader, 1000);
+}
+
 jQuery(() => {
     const isCheckout = !document.querySelector(
         'div[data-block-name="woocommerce/checkout"]'
@@ -282,6 +371,7 @@ jQuery(() => {
                 });
             } else {
                 alert(resp.results.message);
+                location.reload();
             }
         } catch (error) {
             jQuery("#error").append(`<div>Error:</div>`);
@@ -296,6 +386,7 @@ jQuery(() => {
 });
 
 hf.Upon("pp_pageExpired", (e) => {
+    console.log(e);
     jQuery("#submit-payment").prop("disabled", true);
     jQuery("#status").val("Page Expired");
 });
@@ -309,6 +400,7 @@ hf.Upon("pp_responseFromServer", (e) => {
     try {
         r = JSON.stringify(e.detail, null, 2);
     } catch (error) {
+        console.log("Error parsing response: ", error);
         r = e.detail;
     }
 
@@ -317,7 +409,7 @@ hf.Upon("pp_responseFromServer", (e) => {
         : false;
 
     if (e.detail?.data?.error || e.detail?.data?.status === "reject") {
-        alert(e.detail.data.message);
+        showError(e.detail.data.message, "");
         jQuery(".blocks-payplus_loader_hosted").fadeOut();
         overlay(true);
         isCheckout ? location.reload() : null;
@@ -329,9 +421,13 @@ hf.Upon("pp_responseFromServer", (e) => {
             e.detail.errors[0].message === null
                 ? e.detail.results.description
                 : e.detail.errors[0].message;
+        let errorCode =
+            e.detail.errors[0].message === null
+                ? e.detail.results.error_code
+                : e.detail.errors[0].field;
 
         const ifError = (event) => {
-            alert(errorMessage);
+            showError(errorMessage, errorCode);
             jQuery(".blocks-payplus_loader_hosted").fadeOut();
             overlay(true);
             return;
@@ -383,18 +479,21 @@ hf.Upon("pp_responseFromServer", (e) => {
                                 final_response.data.redirect_url;
                         } else {
                             alert(
-                                "Order completion failed: " +
+                                "Order completion failed(Please try again): " +
                                     final_response.message
                             );
+                            location.reload();
                         }
                     },
                     error: function (xhr, status, error) {
                         alert("Error completing order: " + error);
+                        location.reload();
                     },
                 });
             },
             error: function (xhr, status, error) {
                 alert("Error making hosted payment: " + error);
+                location.reload();
             },
         });
     }
