@@ -363,6 +363,16 @@ class PayplusInvoice
 
         !empty($unique_identifier) ? $payload['unique_identifier'] = $unique_identifier . $this->payplus_unique_identifier . $this->payplus_invoice_option['payplus_website_code'] : null;
 
+        if ($payloadInvoiceData['payments'][0]['payment_type'] !== 'credit-card' && empty($payplusApprovalNum)) {
+            if (in_array($payloadInvoiceData['payments'][0]['payment_type'], ['paypal', 'tav-zahav', 'multipass'])) {
+                $payplusApprovalNum = "";
+                $payloadInvoiceData['payments'][0]['transaction_number'] = $payplusApprovalNum;
+                $payloadInvoiceData['payments'][0]['transaction_id'] = $payplusApprovalNum;
+            }
+        }
+
+        !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_number_of_payments', true)) ? $payloadInvoiceData['payments'][0]['number_of_payments'] = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_number_of_payments', true) : null;
+
         $payload = array_merge($payload, ['payments' => $payloadInvoiceData['payments']]);
 
         return $payload;
@@ -565,7 +575,9 @@ class PayplusInvoice
 
         if ($payPlusPayloadInvoice) {
             $payPlusPayloadInvoice = json_decode($payPlusPayloadInvoice, true);
-            unset($payPlusPayloadInvoice['unique_identifier']);
+            if (strpos($docType, 'refund') !== false) {
+                unset($payPlusPayloadInvoice['unique_identifier']);
+            }
             $payPlusPayloadInvoice['totalAmount'] = $isRefund ? -$payPlusPayloadInvoice['totalAmount'] : $payPlusPayloadInvoice['totalAmount'];
             foreach ($payPlusPayloadInvoice['items'] as $key => $item) {
                 $payPlusPayloadInvoice['items'][$key]['price'] = $isRefund ? -$item['price'] : $item['price'];
@@ -1111,12 +1123,14 @@ class PayplusInvoice
 
                     $payload = wp_json_encode($payload);
                     WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload_invoice' => $payload]);
-
-                    $WC_PayPlus_Gateway->payplus_add_log_all($handle, 'Fired  (' . $order_id . ')');
+                    $logCashPayment = !$isCashPayment ? 'No' : 'Yes';
+                    $WC_PayPlus_Gateway->payplus_add_log_all($handle, 'Fired  (' . $order_id . ')' . ' is CashePayment: ' . $logCashPayment);
                     $WC_PayPlus_Gateway->payplus_add_log_all($handle, print_r($payload, true), 'payload');
 
                     if (!$isCashPayment) {
+                        $WC_PayPlus_Gateway->payplus_add_log_all($handle, 'Doing post:  (' . $order_id . ')');
                         $response = WC_PayPlus_Statics::payPlusRemote($this->url_payplus_create_invoice . $payplus_document_type, $payload);
+                        $WC_PayPlus_Gateway->payplus_add_log_all($handle, 'Response: ' . wp_json_encode($response));
                     }
 
                     if (is_wp_error($response)) {

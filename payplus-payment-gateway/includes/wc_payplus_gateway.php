@@ -2056,6 +2056,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         return $payload;
     }
 
+
     /**
      * @param $order_id
      * @param $check_payplus_generate_products_link
