@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.3.2
+ * Version: 7.3.3
  * Tested up to: 6.7
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.3.2');
-define('PAYPLUS_VERSION_DB', 'payplus_3_9');
+define('PAYPLUS_VERSION', '7.3.3');
+define('PAYPLUS_VERSION_DB', 'payplus_4_0');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -115,7 +115,7 @@ class WC_PayPlus
                 echo wp_kses_post(
                     sprintf(
                         __(
-                            "**PayPlus Payment Gateway Plugin - Version 7.3.1 Update**<br><br>
+                            "**PayPlus Payment Gateway Plugin - Version 7.3.2 Update**<br><br>
 
             **Important Notice:**<br>
             This update introduces a major refactoring of the invoice code to enhance performance and align with current WooCommerce standards.<br>
@@ -123,7 +123,7 @@ class WC_PayPlus
 
             If you are updating from a version earlier than 7.2.0, you may encounter issues with refund document creation for orders created in those earlier versions.<br>
             In such cases:<br>
-            1. Downgrade to version 7.3.0 to process refunds.<br>
+            1. Downgrade to version 7.2.9 to process refunds.<br>
             2. Once refunds are complete, you can safely upgrade back to version 7.3.1.<br><br>
 
             No settings will be lost during this process. Please note this only affects the refund process for orders created in versions prior to 7.2.0.",
@@ -830,6 +830,7 @@ class WC_PayPlus
                             "hostedFieldsIsMain" => isset($this->hostedFieldsOptions['hosted_fields_is_main']) ? boolval($this->hostedFieldsOptions['hosted_fields_is_main'] === "yes") : false,
                             "saveCreditCard" => __("Save credit card in my account", "payplus-payment-gateway"),
                             "isSavingCerditCards" => boolval(property_exists($this->payplus_payment_gateway_settings, 'create_pp_token') && $this->payplus_payment_gateway_settings->create_pp_token === 'yes'),
+                            "hostedPayload" => WC()->session ? WC()->session->get('hostedPayload') : null,
                         ]
                     );
                     if (!is_cart() && !is_product() && !is_shop()) {
@@ -870,8 +871,8 @@ class WC_PayPlus
                     }
                 }
 
-                wp_enqueue_style('alertifycss', '//cdn.jsdelivr.net/npm/alertifyjs@1.14.0/build/css/alertify.min.css', array(), '1.14.0', 'all');
-                wp_register_script('alertifyjs', '//cdn.jsdelivr.net/npm/alertifyjs@1.14.0/build/alertify.min.js', array('jquery'), '1.14.0', true);
+                wp_enqueue_style('alertifycss', PAYPLUS_PLUGIN_URL . 'assets/css/alertify.min.css', array(), '1.14.0', 'all');
+                wp_register_script('alertifyjs', PAYPLUS_PLUGIN_URL . 'assets/js/alertify.min.js', array('jquery'), '1.14.0', true);
                 wp_enqueue_script('alertifyjs');
             }
 

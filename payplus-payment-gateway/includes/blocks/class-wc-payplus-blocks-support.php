@@ -92,7 +92,7 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
         return $this->payplus_gateway;
     }
 
-    public function hostedFieldsData($order_id)
+    public function hostedFieldsData($order_id, $isPlaceOrder = false)
     {
         $options = get_option('woocommerce_payplus-payment-gateway_settings');
         $this->vat4All = isset($options['paying_vat_all_order']) ? boolval($options['paying_vat_all_order'] === "yes") : false;
@@ -280,12 +280,18 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
                     // Get the coupon discount amount
                     $coupon_value = $coupon->get_amount();
                 }
+
+                $discount_tax = 0;
+                foreach ($order->get_items('coupon') as $item_id => $item) {
+                    $discount_tax += $item->get_discount_tax();
+                }
+
                 if ($coupon_value > 0) {
                     $item = new stdClass();
                     $item->name = "coupon_discount";
                     $item->quantity = 1;
                     $coupon_value > $totalBeforeDiscount ? $coupon_value = $totalBeforeDiscount : $coupon_value;
-                    $item->price = -$coupon_value;
+                    $item->price = $wc_tax_enabled && !$isTaxIncluded ? - ($coupon_value + $discount_tax) :  -$coupon_value;
                     $item->vat_type = !$wc_tax_enabled ? 1 : 0;
                     $item->vat_type = $wc_tax_enabled && !$isTaxIncluded ? 1 : $item->vat_type;
                     $item->vat_type = $wc_tax_enabled && $isTaxIncluded ? 0 : $item->vat_type;
@@ -314,13 +320,13 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
 
         WC()->session->set('hostedPayload', $payload);
 
-        $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload);
+        $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload, $isPlaceOrder);
 
         $hostedResponseArray = json_decode($hostedResponse, true);
 
         if ($hostedResponseArray['results']['status'] === "error") {
             WC()->session->__unset('page_request_uid');
-            $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload);
+            $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload, $isPlaceOrder);
         }
 
         return $hostedResponse;
@@ -369,7 +375,7 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
             ++$hostedStarted;
             if ($hostedStarted <= 1) {
                 WC()->session->set('hostedStarted', $hostedStarted);
-                $this->hostedFieldsData($this->orderId);
+                $this->hostedFieldsData($this->orderId, true);
                 $payment_details = $result->payment_details;
                 $payment_details['order_id'] = $this->orderId;
                 $payment_details['secret_key'] = $this->secretKey;
@@ -506,6 +512,7 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
             [
                 'ajax_url' => admin_url('admin-ajax.php'),
                 'frontNonce' => wp_create_nonce('frontNonce'),
+                "hostedPayload" => WC()->session ? WC()->session->get('hostedPayload') : null,
             ]
         );
 

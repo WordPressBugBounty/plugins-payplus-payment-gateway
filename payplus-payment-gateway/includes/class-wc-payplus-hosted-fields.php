@@ -18,13 +18,14 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
     public $payPlusGateway;
     public $isHideLoaderLogo;
     public $isHostedStarted;
+    public $isPlaceOrder;
     // public $hostedFieldsResponse;
 
 
     /**
      *
      */
-    public function __construct($order_id = "000", $order = null)
+    public function __construct($order_id = "000", $order = null, $isPlaceOrder = false)
     {
         $this->payPlusGateway = $this->get_main_payplus_gateway();
         $this->isHideLoaderLogo = boolval(isset($this->payPlusGateway->hostedFieldsOptions['hide_loader_logo']) && $this->payPlusGateway->hostedFieldsOptions['hide_loader_logo'] === 'yes');
@@ -34,9 +35,9 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $this->apiKey = $this->testMode ? $this->payPlusGateway->settings['dev_api_key'] : $this->payPlusGateway->settings['api_key'];
         $this->secretKey = $this->testMode ? $this->payPlusGateway->settings['dev_secret_key'] : $this->payPlusGateway->settings['secret_key'];
         $this->paymentPageUid = $this->testMode ? $this->payPlusGateway->settings['dev_payment_page_id'] : $this->payPlusGateway->settings['payment_page_id'];
-        // $this->isHostedStarted = WC()->session->get('hostedStarted');
         $this->order_id = $order_id;
         $this->order = $order;
+        $this->isPlaceOrder = $isPlaceOrder;
 
         define('API_KEY', $this->apiKey);
         define('SECRET_KEY', $this->secretKey);
@@ -74,20 +75,22 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         WC()->session->set('hostedStarted', false);
         $this->checkHostedTime() ? $hostedResponse = $this->hostedFieldsData($this->order_id) : $hostedResponse = $this->emptyResponse();
         $hostedResponse = !empty($hostedResponse) ? $hostedResponse : $hostedResponse = $this->emptyResponse();
+        $hostedResponseArray = json_decode($hostedResponse, true);
+        $hostedResponseArray['results']['status'] === "error" ? $this->updateOrderId() : null;
 
         if (isset($hostedResponse) && $hostedResponse && json_decode($hostedResponse, true)['results']['status'] === "success") {
-            $script_version = filemtime(plugin_dir_path(__DIR__) . 'assets/js/hostedFieldsScript.min.js');
+            $script_version = filemtime(plugin_dir_path(__DIR__) . 'assets/js/hostedFieldsScript.js');
             $template_path = plugin_dir_path(__DIR__) . 'templates/hostedFields.php';
 
             require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-error-handler.php';
-            $payPlusErrors = new WCPayplusErrorCodes();
+            $payPlusErrors = new WCPayPlusErrorCodes();
 
             if (file_exists($template_path)) {
                 wp_enqueue_style('hosted-css', PAYPLUS_PLUGIN_URL . 'assets/css/hostedFields.css', [], $script_version);
                 include $template_path;
             }
             wp_enqueue_script('payplus-hosted-fields-js', PAYPLUS_PLUGIN_URL . 'assets/js/payplus-hosted-fields/dist/payplus-hosted-fields.min.js', array('jquery'), '1.0', true);
-            wp_register_script('payplus-hosted', PAYPLUS_PLUGIN_URL . 'assets/js/hostedFieldsScript.min.js', array('jquery'), '1.0', true);
+            wp_register_script('payplus-hosted', PAYPLUS_PLUGIN_URL . 'assets/js/hostedFieldsScript.js', array('jquery'), '1.0', true);
             wp_localize_script(
                 'payplus-hosted',
                 'payplus_script_hosted',
@@ -133,8 +136,9 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         }
     }
 
-    public function updateOrderId($randomHash)
+    public function updateOrderId($randomHash = null)
     {
+        $randomHash = $randomHash ?? bin2hex(random_bytes(16));
         WC()->session->set('order_awaiting_payment', $randomHash);
         $order_id = $randomHash;
         return $order_id;
@@ -325,12 +329,18 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
                     // Get the coupon discount amount
                     $coupon_value = $coupon->get_amount();
                 }
+
+                $discount_tax = 0;
+                foreach ($order->get_items('coupon') as $item_id => $item) {
+                    $discount_tax += $item->get_discount_tax();
+                }
+
                 if ($coupon_value > 0) {
                     $item = new stdClass();
                     $item->name = "coupon_discount";
                     $item->quantity = 1;
                     $coupon_value > $totalBeforeDiscount ? $coupon_value = $totalBeforeDiscount : $coupon_value;
-                    $item->price = -$coupon_value;
+                    $item->price = $wc_tax_enabled && !$isTaxIncluded ? - ($coupon_value + $discount_tax) :  -$coupon_value;
                     $item->vat_type = !$wc_tax_enabled ? 1 : 0;
                     $item->vat_type = $wc_tax_enabled && !$isTaxIncluded ? 1 : $item->vat_type;
                     $item->vat_type = $wc_tax_enabled && $isTaxIncluded ? 0 : $item->vat_type;
@@ -352,24 +362,18 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $firstMessage = $order_id === "000" ? "-=#* 1st field generated *%=- - " : "";
         $payload = wp_json_encode($data);
         is_int($data->more_info) && $data->more_info === $order_id ? WC_PayPlus_Meta_Data::update_meta($order, ['payplus_hosted_page_request_uid' => $hostedResponseArray['payment_page_uid'], 'payplus_payload' => $payload]) : null;
-        if ($hostedResponse === $payload) {
-            $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", "HostedFields-hostedFieldsData(2): ($order_id)\nPayload is identical no need to run.");
-            return WC()->session->get('hostedResponse');
-        } else {
-            $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", $firstMessage  . "HostedFields-hostedFieldsData(2)\n");
-        }
 
-        $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", "HostedFields-hostedFieldsData(3) Payload: \n$payload");
+        $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", "HostedFields-hostedFieldsData-Class Payload: \n$payload");
 
         WC()->session->set('hostedPayload', $payload);
 
-        $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload);
+        $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload, $this->isPlaceOrder);
 
         $hostedResponseArray = json_decode($hostedResponse, true);
 
         if ($hostedResponseArray['results']['status'] === "error") {
             WC()->session->set('page_request_uid', false);
-            $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload);
+            $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload, $this->isPlaceOrder);
         }
 
         return $hostedResponse;
