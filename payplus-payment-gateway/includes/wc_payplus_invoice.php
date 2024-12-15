@@ -493,7 +493,7 @@ class PayplusInvoice
                 foreach ($columns as $column_name => $column_info) {
                     $new_columns[$column_name] = $column_info;
                     if ('shipping_address' === $column_name) {
-                        $new_columns['order_invoice'] = "<span class='text-center'>" . __('Invoice+ Documents', 'payplus-payment-gateway') . "</span>";
+                        $new_columns['order_invoice'] = "<img style='height: 30px;' src='" . PAYPLUS_PLUGIN_URL_ASSETS_IMAGES . "InvoicePlusLogo.png' alt='Invoice Plus documents'>";
                     }
                 }
             }
@@ -886,7 +886,7 @@ class PayplusInvoice
 
             $sql .= implode(' OR ', $clauses) . ")";
 
-            $resultApps = $wpdb->get_results($sql, OBJECT);
+            $resultApps = $wpdb->get_results($sql, OBJECT); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
             $resultApps = $this->payplus_set_object_payment($order_id, $resultApps);
         }
         return $resultApps;
