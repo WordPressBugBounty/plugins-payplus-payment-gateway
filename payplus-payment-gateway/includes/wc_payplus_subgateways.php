@@ -218,7 +218,7 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
                 'default' => '3'
             ]
         ];
-        if ($this->id === 'payplus-payment-gateway-googlepay' || $this->id === 'payplus-payment-gateway-applepay') {
+        if ($this->id === 'payplus-payment-gateway-googlepay' || $this->id === 'payplus-payment-gateway-applepay' || $this->id === 'payplus-payment-gateway-bit') {
             $this->form_fields['hide_payments_field'] = [
                 'title' => __('Hide Number Of Payments In Payment Page', 'payplus-payment-gateway'),
                 'type' => 'select',
@@ -507,7 +507,8 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
         }
         $order = wc_get_order($order_id);
         if ($this->id === "payplus-payment-gateway-hostedfields") {
-            new WC_PayPlus_HostedFields($order_id, $order, true);
+            $hostedClass = new WC_PayPlus_HostedFields($order_id, $order, true);
+            $hostedClass->hostedFieldsData($order_id);
         }
         return array(
             'result'   => 'success',

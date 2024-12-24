@@ -903,13 +903,16 @@ jQuery(function ($) {
                                                     .removeClass("processing")
                                                     .unblock();
                                                 hf.SubmitPayment();
-                                            } else {
-                                                alert(
-                                                    "Whoops something went wrong, you were not charged, refresh the page and try again"
-                                                );
-                                                location.reload();
                                             }
                                         }
+                                    } else {
+                                        window.onbeforeunload = null; // If `onbeforeunload` is set directly
+                                        window.removeEventListener(
+                                            "beforeunload",
+                                            wc_checkout_form.detachUnloadEventsOnSubmit()
+                                        );
+                                        // Then reload the page
+                                        location.reload();
                                     }
                                 },
                             });
