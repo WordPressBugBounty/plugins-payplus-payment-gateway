@@ -462,14 +462,37 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
         add_action('wp_ajax_nopriv_complete_order', [$this, 'complete_order_via_ajax']);
         add_action('wp_ajax_get-hosted-payload', [$this, 'getHostedPayload']);
         add_action('wp_ajax_nopriv_get-hosted-payload', [$this, 'getHostedPayload']);
+        add_action('wp_ajax_regenerate-hosted-link', [$this, 'regenerateHostedLink']);
+        add_action('wp_ajax_nopriv_regenerate-hosted-link', [$this, 'regenerateHostedLink']);
+    }
+
+    public function regenerateHostedLink()
+    {
+
+        check_ajax_referer('frontNonce', '_ajax_nonce');
+        $order_id = '000';
+
+        WC()->session->set('hostedTimeStamp', false);
+        WC()->session->set('page_request_uid', false);
+        WC()->session->set('hostedResponse', false);
+        WC()->session->__unset('order_awaiting_payment');
+        WC()->session->__unset('hostedFieldsUUID');
+        WC()->session->set('hostedStarted', false);
+        $this->payplus_add_log_all('hosted-fields-data', 'Regenerate hosted link - to 000');
+        wp_send_json_success(array(
+            'message' => 'regenerate sent',
+            'order_id' => $order_id
+        ));
     }
 
     public function getHostedPayload()
     {
         check_ajax_referer('frontNonce', '_ajax_nonce');
         $hostedPayload = WC()->session->get('hostedPayload');
+        $hostedResponse = WC()->session->get('hostedResponse');
         wp_send_json_success(array(
-            'hostedPayload' => $hostedPayload
+            'hostedPayload' => $hostedPayload,
+            'hostedResponse' => $hostedResponse
         ));
     }
 
@@ -508,7 +531,6 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
         $order = wc_get_order($order_id);
         if ($this->id === "payplus-payment-gateway-hostedfields") {
             $hostedClass = new WC_PayPlus_HostedFields($order_id, $order, true);
-            $hostedClass->hostedFieldsData($order_id);
         }
         return array(
             'result'   => 'success',

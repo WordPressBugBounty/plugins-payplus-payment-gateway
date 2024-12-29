@@ -651,6 +651,15 @@ jQuery(function ($) {
                             $(
                                 ".woocommerce-SavedPaymentMethods-saveNew"
                             ).hide();
+                            setTimeout(function () {
+                                if (
+                                    $(
+                                        "input#payment_method_payplus-payment-gateway-hostedfields"
+                                    ).is(":checked")
+                                ) {
+                                    $(".container.hostedFields").show();
+                                }
+                            }, 3000);
                         };
                         hostedIsMain ? hideHostedFieldsListItem() : null;
 
@@ -874,6 +883,9 @@ jQuery(function ($) {
                                     const hostedPayload = JSON.parse(
                                         response.data.hostedPayload
                                     );
+                                    const hostedResponse = JSON.parse(
+                                        response.data.hostedResponse
+                                    );
                                     if (
                                         hostedPayload.more_info &&
                                         !isNaN(hostedPayload.more_info)
@@ -910,6 +922,9 @@ jQuery(function ($) {
                                         window.removeEventListener(
                                             "beforeunload",
                                             wc_checkout_form.detachUnloadEventsOnSubmit()
+                                        );
+                                        alert(
+                                            "The payment page has expired, refresh the page to continue"
                                         );
                                         // Then reload the page
                                         location.reload();

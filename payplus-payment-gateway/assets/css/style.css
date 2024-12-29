@@ -1,10 +1,67 @@
 .checkout-payplus
-    li[class*="wc_payment_method payment_method_payplus-payment-gateway"]
+    li[class*="wc_payment_method payment_method_payplus-payment-gateway-"]
     label:first-of-type {
     display: flex;
     order: 2;
     margin-bottom: 1px;
     align-items: center;
+}
+
+.checkout-payplus
+    li[class*="wc_payment_method payment_method_payplus-payment-gateway-"] {
+    display: flex;
+}
+
+.checkout-payplus
+    li[class^="wc_payment_method payment_method_payplus-payment-gateway"]
+    input[type="radio"][name="payment_method"]:not(:checked) {
+    display: unset !important;
+}
+
+.checkout-payplus
+    li[class*="wc_payment_method payment_method_payplus-payment-gateway-hostedfields"] {
+    display: ruby;
+}
+
+.checkout-payplus
+    li[class^="wc_payment_method payment_method_payplus-payment-gateway"]
+    label
+    img {
+    margin-right: 15px !important;
+}
+
+.checkout-payplus
+    #add_payment_method
+    #payment
+    ul.payment_methods
+    li:not(.woocommerce-notice)::after,
+.checkout-payplus
+    #add_payment_method
+    #payment
+    ul.payment_methods
+    li:not(.woocommerce-notice)::before,
+.checkout-payplus
+    .woocommerce-cart
+    #payment
+    ul.payment_methods
+    li:not(.woocommerce-notice)::after,
+.checkout-payplus
+    .woocommerce-cart
+    #payment
+    ul.payment_methods
+    li:not(.woocommerce-notice)::before,
+.checkout-payplus
+    .woocommerce-checkout
+    #payment
+    ul.payment_methods
+    li:not(.woocommerce-notice)::after,
+.checkout-payplus
+    .woocommerce-checkout
+    #payment
+    ul.payment_methods
+    li:not(.woocommerce-notice)::before {
+    content: unset !important;
+    display: table;
 }
 
 .checkout-payplus
@@ -21,15 +78,30 @@
     order: -1;
     margin-left: 20px;
     max-height: 32px;
-    max-width: 64px;
+    max-width: 32px;
+}
+
+.checkout-payplus
+    li[class^="wc_payment_method payment_method_payplus-payment-gateway"]
+    input[type="radio"][name="payment_method"]:not(:checked) {
+    display: flex;
+    /* Your styles here */
 }
 
 #payment
     > ul
-    > li[class^="wc_payment_method payment_method_payplus-payment-gateway-"] {
+    > li[class^="wc_payment_method payment_method_payplus-payment-gateway-"]
     img {
-        max-height: 32px;
-    }
+    max-height: 32px;
+    max-width: 32px;
+}
+
+#payment
+    > ul
+    > li[class^="wc_payment_method payment_method_payplus-payment-gateway"]
+    img {
+    max-height: 32px;
+    max-width: 64px;
 }
 
 .checkout-payplus

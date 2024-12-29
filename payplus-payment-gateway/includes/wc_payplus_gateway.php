@@ -145,7 +145,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->api_key = $this->api_test_mode ? $this->get_option('dev_api_key') ?? null : $this->get_option('api_key');
         $this->secret_key = $this->api_test_mode ? $this->get_option('dev_secret_key') ?? null : $this->get_option('secret_key');
         $this->payment_page_id = $this->api_test_mode ? $this->get_option('dev_payment_page_id') ?? null : $this->get_option('payment_page_id');
-        $this->current_time = wp_date('Y-m-d H:i:s', current_time('timestamp'));
+        $this->current_time = wp_date('Y-m-d H:i:s', current_time('timestamp'), new DateTimeZone('Asia/Jerusalem'));
         $this->rounding_decimals = ROUNDING_DECIMALS;
         $this->hide_custom_fields_buttons = $this->get_option('hide_custom_fields_buttons') == 'yes' ? true : false;
         $this->hostedFieldsOptions = get_option('woocommerce_payplus-payment-gateway-hostedfields_settings');
@@ -354,6 +354,9 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
     public function payplus_display_admin_notice()
     {
+        if (!wp_verify_nonce($this->_wpnonce, 'PayPlusGateWayNonce')) {
+            wp_die('Not allowed! - payplus_admin_notice');
+        }
         // Only show the notice if the transient is set.
         if (get_transient('payplus_admin_notice')) {
             if (
@@ -365,7 +368,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 if (!empty($this->callback_addr)) {
                     $alert = strpos($this->callback_addr, 'https://') === 0 || strpos($this->callback_addr, 'http://') === 0 ? true : false;
 
-                    !$alert ? $message = __('Sorry we only support https:// or http:// the callback will not be fired.', 'payplus-payment-gateway') : $message = false;
+                    !$alert ? $message = __('Make sure that there is either - https:// or http:// or the callback will not be fired.', 'payplus-payment-gateway') : $message = false;
 
                     if ($message) { ?>
                         <div class="notice notice-error is-dismissible">
@@ -1872,8 +1875,17 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $productsItems[] = ($json) ? wp_json_encode($itemDetails) : (object) $itemDetails;
             $totalCartAmount += $productPrice;
         }
+
+        // YourMoment Split Shipping
+        $shipping_splitted = WC()->session->get('shipping_splitted');
+        if ($shipping_splitted === null) {
+            $shipping_splitted = false;
+        }
+        // YourMoment Split Shipping
+
         $shipping_methods = $order->get_shipping_methods();
-        if ($shipping_methods) {
+
+        if ($shipping_methods && !$shipping_splitted) {
             foreach ($shipping_methods as $shipping_method) {
                 $shipping_tax = 0;
                 $shipping_method_data = $shipping_method->get_data();
@@ -1899,6 +1911,23 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 $totalCartAmount += $productPrice;
             }
         }
+
+        // YourMoment Split Shipping
+        if ($shipping_splitted) {
+            $orderTotal = $order->get_total();
+            if ($totalCartAmount < $orderTotal) {
+                $productPrice = $orderTotal - $totalCartAmount;
+                $itemDetails = [
+                    'name' => __('Shipping', 'payplus-payment-gateway'),
+                    'quantity' => 1,
+                    'price' => $productPrice,
+                ];
+                $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+                $totalCartAmount += $productPrice;
+            }
+        }
+        // YourMoment Split Shipping
+
         // coupons
 
         if (!$isAdmin && $order->get_total_discount()) {
@@ -1940,6 +1969,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
             $totalCartAmount += $priceGift;
         }
+
         $totalCartAmount = round($totalCartAmount, $this->rounding_decimals);
 
         $return = (object) ["productsItems" => $productsItems, 'amount' => $totalCartAmount];
@@ -2373,6 +2403,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             }
             $order_id = intval($response['transaction']['more_info']);
             $order = wc_get_order($order_id);
+            $datetime = current_datetime();
+            $LocalTime = $datetime->format('Y-m-d H:i:s');
             if ($order) {
                 $orderStatus = $order->get_status();
                 $orderStatusNote = $orderStatus === 'processing' ? 'Order is on processing status! - callback will end.' : $orderStatus;
@@ -2380,17 +2412,17 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     'payplus_callback_secured',
                     "
                     Time: $this->current_time
+                    IsraelTime: $LocalTime
                     Order: $order_id
                     HTTP_HASH: $payplusHash
                     PayPlus Generated Hash: $payplusGenHash
-                    Order Status: $orderStatusNote
+                    Order Status: $orderStatusNote 
+                    Transaction Type: {$response['transaction_type']}
                     PayPlus Transaction Callback: $json
                     "
                 );
-                if ($orderStatus === 'processing') {
-                    return;
-                }
 
+                $transactionUid = sanitize_text_field($response['transaction']['uid']);
                 $status_code = sanitize_text_field($response['transaction']['status_code']);
                 $this->payplus_add_log_all(
                     'payplus_callback_secured',
@@ -2398,6 +2430,34 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     Callback continues: $order_id - doing database query now, status_code: $status_code
                     "
                 );
+
+                if ($status_code === "000") {
+                    if ($response['transaction_type'] == "Charge") {
+                        if ($this->fire_completed && $this->successful_order_status === 'default-woo') {
+                            WC_PayPlus_Meta_Data::sendMoreInfo($order, 'process_payment->firePaymentComplete', $transactionUid);
+                            $order->payment_complete();
+                            $this->payplus_add_log_all(
+                                'payplus_callback_secured',
+                                "Order # $order_id Running Woocommerce payment complete process."
+                            );
+                        }
+                        if ($this->successful_order_status !== 'default-woo') {
+                            WC_PayPlus_Meta_Data::sendMoreInfo($order,  'process_payment->' . $this->successful_order_status, $transactionUid);
+                            $order->update_status($this->successful_order_status);
+                            $this->payplus_add_log_all(
+                                'payplus_callback_secured',
+                                "Updating order #$order_id status to: $this->successful_order_status"
+                            );
+                        }
+                    } else {
+                        WC_PayPlus_Meta_Data::sendMoreInfo($order,  'process_payment->wc-on-hold', $transactionUid);
+                        $order->update_status('wc-on-hold');
+                        $this->payplus_add_log_all(
+                            'payplus_callback_secured',
+                            "Updating order #$order_id status to: wc-on-hold"
+                        );
+                    }
+                }
 
                 $result = $wpdb->get_results($wpdb->prepare(
                     "SELECT id as rowId, count(*) as rowCount, count_process, function_begin FROM {$wpdb->prefix}payplus_payment_process WHERE order_id = %d AND status_code = %s",
@@ -2483,6 +2543,11 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $response = array(
             'status' => 'success',
             'message' => 'PayPlus callback function ended.',
+        );
+
+        $this->payplus_add_log_all(
+            'payplus_callback_secured',
+            "PayPlus callback function ended."
         );
 
         wp_die(
