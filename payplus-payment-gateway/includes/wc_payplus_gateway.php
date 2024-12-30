@@ -2401,6 +2401,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 // Send the request
                 wp_remote_post($url, $args);
             }
+            // Wait for 5 seconds to make sure the order is updated by the payment gateway native process.
             sleep(5);
             $order_id = intval($response['transaction']['more_info']);
             $order = wc_get_order($order_id);
@@ -2417,7 +2418,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     Order: $order_id
                     HTTP_HASH: $payplusHash
                     PayPlus Generated Hash: $payplusGenHash
-                    Order Status: $orderStatusNote 
+                    Order Status note: $orderStatusNote 
+                    Order Status: $orderStatus
                     Transaction Type: {$response['transaction_type']}
                     PayPlus Transaction Callback: $json
                     "
