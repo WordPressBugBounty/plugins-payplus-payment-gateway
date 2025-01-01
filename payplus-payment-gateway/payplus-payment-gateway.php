@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.4.2
+ * Version: 7.4.3
  * Tested up to: 6.7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.4.2');
-define('PAYPLUS_VERSION_DB', 'payplus_4_4');
+define('PAYPLUS_VERSION', '7.4.3');
+define('PAYPLUS_VERSION_DB', 'payplus_4_5');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -37,6 +37,7 @@ class WC_PayPlus
     public $importApplePayScript;
     public $hostedFieldsOptions;
     private $isHostedInitiated = false;
+    public $secret_key;
 
     /**
      * The main PayPlus gateway instance. Use get_main_payplus_gateway() to access it.
@@ -59,9 +60,10 @@ class WC_PayPlus
         $this->isAutoPPCC = boolval(property_exists($this->payplus_payment_gateway_settings, 'auto_load_payplus_cc_method') && $this->payplus_payment_gateway_settings->auto_load_payplus_cc_method === 'yes');
         $this->importApplePayScript = boolval(property_exists($this->payplus_payment_gateway_settings, 'import_applepay_script') && $this->payplus_payment_gateway_settings->import_applepay_script === 'yes');
         $this->isPayPlus = boolval(property_exists($this->payplus_payment_gateway_settings, 'enabled') && $this->payplus_payment_gateway_settings->enabled === 'yes');
+        $this->secret_key = boolval($this->payplus_payment_gateway_settings->api_test_mode === "yes") ? $this->payplus_payment_gateway_settings->dev_secret_key ?? null : $this->payplus_payment_gateway_settings->secret_key;
 
         add_action('admin_init', [$this, 'check_environment']);
-        add_action('admin_init', [$this, 'wc_payplus_check_version']);
+        // add_action('admin_init', [$this, 'wc_payplus_check_version']);
 
         add_action('admin_notices', [$this, 'admin_notices'], 15);
         add_action('plugins_loaded', [$this, 'init']);
@@ -75,10 +77,6 @@ class WC_PayPlus
         //end custom hook
 
         add_action('woocommerce_before_checkout_form', [$this, 'msg_checkout_code']);
-        // add_action('admin_enqueue_scripts', [$this, 'check_websocket_connectivity']);
-        // add_action('wp_ajax_websocket_check_notification', [$this, 'websocket_check_notification']);
-        // add_action('admin_notices', [$this, 'display_websocket_inactive_notice']);
-
 
         //FILTER
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), [$this, 'plugin_action_links']);
@@ -130,119 +128,6 @@ class WC_PayPlus
         </div>
         <?php
     }
-
-
-    public function websocket_check_notification()
-    {
-        check_ajax_referer('websocket_check_nonce', 'nonce');
-
-        if (isset($_POST['is_active'])) {
-            $is_active = filter_var(wp_unslash($_POST['is_active']), FILTER_VALIDATE_BOOLEAN);
-
-
-            if ($is_active) {
-                set_transient('websocket_inactive_warning', true);
-            }
-            // Store a transient to display admin notice
-
-        }
-
-        wp_send_json_success();
-    }
-
-    // Display an admin notice if WebSocket is inactive
-    public function display_websocket_inactive_notice()
-    {
-        if (get_transient('websocket_inactive_warning')) {
-        ?>
-            <div class="notice notice-error">
-                <p>
-                    <strong>PayPlus Warning:</strong> WebSockets are active on your website. This may make your site vulnerable
-                    for
-                    hacks!
-                </p>
-            </div>
-        <?php
-            // Delete the transient after displaying the notice
-            delete_transient('websocket_inactive_warning');
-        }
-    }
-    // Enqueue the WebSocket check script in admin area
-
-    public function check_websocket_connectivity()
-    {
-        ?>
-        <script>
-            document.addEventListener('DOMContentLoaded', function() {
-                const wsUrl = 'wss://ws.postman-echo.com/raw'; // WebSocket server URL
-
-                // Function to check WebSocket connectivity and show response
-                async function checkWebSocket() {
-                    return new Promise((resolve) => {
-                        let ws;
-                        try {
-                            ws = new WebSocket(wsUrl);
-                        } catch (error) {
-                            console.error('WebSocket initialization error:', error);
-                            resolve(false);
-                            return;
-                        }
-
-                        // When the connection is open
-                        ws.onopen = function() {
-                            console.log('WebSocket connection opened');
-
-                            // Send a message to the server
-                            const message = 'Hello from the client!';
-                            ws.send(message);
-                            console.log('Message sent:', message);
-                        };
-
-                        // Listen for messages from the server
-                        ws.onmessage = function(event) {
-                            console.log('Message received from server:', event.data);
-
-                            // Display the response on the page
-                            const responseElement = document.getElementById('ws-response');
-                            if (responseElement) {
-                                responseElement.textContent = `Server Response: ${event.data}`;
-                            }
-
-                            // Close the WebSocket connection
-                            ws.close();
-                            resolve(true);
-                        };
-
-                        // If there is an error
-                        ws.onerror = function(error) {
-                            console.error('WebSocket error:', error);
-                            resolve(false);
-                        };
-
-                        // Timeout after 3 seconds if no response
-                        setTimeout(() => {
-                            ws.close();
-                            resolve(false);
-                        }, 3000);
-                    });
-                }
-
-                // Check WebSocket and send the result via AJAX
-                checkWebSocket().then((isActive) => {
-                    if (isActive) {
-                        // Send AJAX request to notify server
-                        jQuery.post(ajaxurl, {
-                            action: 'websocket_check_notification',
-                            is_active: isActive,
-                            nonce: "<?php echo esc_js(wp_create_nonce('websocket_check_nonce')); ?>"
-                        });
-                    }
-                });
-            });
-        </script>
-        <?php
-    }
-
 
     public function hostedPayment()
     {
@@ -721,6 +606,8 @@ class WC_PayPlus
                     add_action('woocommerce_after_checkout_validation', [$this, 'payplus_validation_cart_checkout'], 10, 2);
                     add_action('wp_enqueue_scripts', [$this, 'load_checkout_assets']);
                     add_action('woocommerce_api_callback_response', [$this, 'callback_response']);
+                    add_action('payplus_delayed_event', [$this, 'handle_delayed_event']);
+
                     if (WP_DEBUG_LOG) {
                         add_action('woocommerce_api_callback_response_hash', [$this, 'callback_response_hash']);
                     }
@@ -1125,9 +1012,69 @@ class WC_PayPlus
              */
             public function callback_response()
             {
-                $this->payplus_gateway = $this->get_main_payplus_gateway();
-                $this->payplus_gateway->callback_response();
+                $json = file_get_contents('php://input');
+                $response = json_decode($json, true);
+                $payplusHash = isset($_SERVER['HTTP_HASH']) ? sanitize_text_field($_SERVER['HTTP_HASH']) : ""; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash
+                $payplusGenHash = base64_encode(hash_hmac('sha256', $json, $this->secret_key, true));
+
+                if ($payplusGenHash === $payplusHash) {
+                    $order_id = intval($response['transaction']['more_info']);
+                    $order = wc_get_order($order_id);
+                    WC_PayPlus_Meta_Data::update_meta($order, ['payplus_callback_response' => $json]);
+                    // Add a delayed event
+                    $this->schedule_delayed_event($order_id);
+                }
+                $response = array(
+                    'status' => 'success',
+                    'message' => 'PayPlus callback function ended.',
+                );
+
+                wp_die(
+                    wp_json_encode($response),
+                    '',
+                    array(
+                        'response' => 200,
+                        'content_type' => 'application/json'
+                    )
+                );
             }
+
+            /**
+             * Processes the delayed event for an order.
+             *
+             * @param int $order_id The order ID to process.
+             */
+            public function handle_delayed_event($order_id)
+            {
+                $order = wc_get_order($order_id);
+
+                if ($order) {
+                    // Perform delayed processing logic here
+                    $datetime = current_datetime();
+                    $LocalTime = $datetime->format('Y-m-d H:i:s');
+                    $order->add_order_note('PayPlus secure callback event initiated - ' . $LocalTime);
+                    $this->payplus_gateway = $this->get_main_payplus_gateway();
+                    $this->payplus_gateway->legacy_callback_response($order_id);
+                    $this->payplus_gateway->payplus_add_log_all(
+                        'payplus_callback_secured',
+                        "PayPlus order # $order_id callback function ended."
+                    );
+                    // Add further actions like updating order status, sending notifications, etc.
+                }
+            }
+
+            /**
+             * Schedules a delayed event for the order processing.
+             *
+             * @param int $order_id The order ID to process.
+             */
+            private function schedule_delayed_event($order_id)
+            {
+                if (!wp_next_scheduled('payplus_delayed_event', [$order_id])) {
+                    wp_schedule_single_event(time() + 5, 'payplus_delayed_event', [$order_id]); // 5 seconds delay
+                }
+            }
+
             /**
              * @return void
              */
