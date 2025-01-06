@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.4.3
+ * Version: 7.4.4
  * Tested up to: 6.7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.4.3');
-define('PAYPLUS_VERSION_DB', 'payplus_4_5');
+define('PAYPLUS_VERSION', '7.4.4');
+define('PAYPLUS_VERSION_DB', 'payplus_4_6');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -407,7 +407,7 @@ class WC_PayPlus
     public function payplus_after_refund($order_id, $refund_id)
     {
         $order = wc_get_order($order_id);
-        $invoice_api = new PayplusInvoice();
+        $invoice_api = $this->invoice_api;
         $payment_method = $order->get_payment_method();
         if (strpos($payment_method, 'payplus') === false) {
             //$amount = WC_PayPlus_Meta_Data::get_meta($refund_id, '_refund_amount', true);
@@ -584,7 +584,7 @@ class WC_PayPlus
              */
             public function init()
             {
-
+                $isPayPlusEnabled = isset($this->payplus_payment_gateway_settings->enabled) && $this->payplus_payment_gateway_settings->enabled === 'yes';
                 load_plugin_textdomain('payplus-payment-gateway', false, dirname(plugin_basename(__FILE__)) . '/languages/');
                 if (class_exists("WooCommerce")) {
                     $this->_wpnonce = wp_create_nonce('_wp_payplusIpn');
@@ -593,7 +593,9 @@ class WC_PayPlus
                     require_once PAYPLUS_PLUGIN_DIR . '/includes/wc_payplus_gateway.php';
                     require_once PAYPLUS_PLUGIN_DIR . '/includes/wc_payplus_subgateways.php';
                     require_once PAYPLUS_PLUGIN_DIR . '/includes/wc_payplus_invoice.php';
-                    require_once PAYPLUS_PLUGIN_DIR . '/includes/wc_payplus_express_checkout.php';
+                    if ($isPayPlusEnabled) {
+                        require_once PAYPLUS_PLUGIN_DIR . '/includes/wc_payplus_express_checkout.php';
+                    }
                     require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-payment-tokens.php';
                     require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-order-data.php';
                     require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-hosted-fields.php';
@@ -1201,10 +1203,15 @@ class WC_PayPlus
                 if (!wp_verify_nonce(sanitize_key($wpnonce), 'PayPlusGateWayNonce')) {
                     wp_die('Not allowed! - payplus_check_exists_table');
                 }
-                global $wpdb;
-                $table_name = $wpdb->prefix . $table;
-                $like_table_name = '%' . $wpdb->esc_like($table_name) . '%';
-                $flag = ($wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $like_table_name)) != $table_name) ? true : false;
+                $transient_key = 'payplus_check_exists_table_' . $table;
+                $flag = get_transient($transient_key);
+                if ($flag === false) {
+                    global $wpdb;
+                    $table_name = $wpdb->prefix . $table;
+                    $like_table_name = '%' . $wpdb->esc_like($table_name) . '%';
+                    $flag = ($wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $like_table_name)) != $table_name) ? true : false;
+                    set_transient($transient_key, $flag, HOUR_IN_SECONDS);
+                }
                 return $flag;
             }
             public static function payplus_get_admin_menu($nonce)

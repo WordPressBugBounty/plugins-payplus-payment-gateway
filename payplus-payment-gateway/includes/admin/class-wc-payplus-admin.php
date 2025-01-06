@@ -108,6 +108,10 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         add_action('add_meta_boxes', [$this, 'payPlusMetaboxes']);
         add_action('admin_head', [$this, 'hide_delete_update_buttons_css']);
 
+        if (isset($this->allSettings['show_payplus_integrity_check']) && $this->allSettings['show_payplus_integrity_check'] === 'yes') {
+            add_action('admin_menu', [$this, 'add_admin_menu_button']);
+        }
+
         // remove query args after error shown
         add_filter('removable_query_args', [$this, 'add_removable_arg']);
         add_filter('woocommerce_get_settings_checkout', [$this, 'payplusGetAdminSettings'], 10, 2);
@@ -119,6 +123,43 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         }
     }
 
+    /**
+     * Add custom button to admin menu
+     */
+    public function add_admin_menu_button()
+    {
+        add_menu_page(
+            __('PayPlus Hash Check', 'payplus-payment-gateway'),
+            __('PayPlus Hash Check', 'payplus-payment-gateway'),
+            'manage_options',
+            'payplus-hash-check',
+            [$this, 'display_hash_check_notice'],
+            'dashicons-admin-tools',
+            6
+        );
+    }
+
+    public function display_hash_check_notice()
+    {
+        $plugin_dir = PAYPLUS_PLUGIN_DIR;
+        $integrity_check_result = verify_plugin_integrity($plugin_dir);
+        if ($integrity_check_result !== 'All files are intact.') {
+            set_transient('payplus_plugin_integrity_check_failed', $integrity_check_result);
+            echo '<div class="notice notice-error is-dismissible"><p>' . esc_html($integrity_check_result) . '</p></div>';
+        } else {
+            set_transient('payplus_plugin_integrity_check_success', $integrity_check_result);
+            echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($integrity_check_result) . '</p></div>';
+        }
+
+        // Display the message on the page
+        add_action('admin_notices', function () use ($integrity_check_result) {
+            if ($integrity_check_result !== 'All files are intact.') {
+                echo '<div class="notice notice-error is-dismissible"><p>' . esc_html($integrity_check_result) . '</p></div>';
+            } else {
+                echo '<div class="notice notice-success is-dismissible"><p>' . esc_html($integrity_check_result) . '</p></div>';
+            }
+        });
+    }
 
     public function makeTokenPayment()
     {
