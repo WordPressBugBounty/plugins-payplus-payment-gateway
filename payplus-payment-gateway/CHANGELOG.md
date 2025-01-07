@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.4.6] - 07-01-2025 - (Portgas D. Ace) 
+
+- Tweak - Added support for the Transaction Type product field in both the PayPlus Embedded and main gateway.
+- Tweak - Updated instructions for the Transaction Type product field.
+- Added - PayPlus Embedded now supports the Successful Order Status and Payment Completed settings.
+- Tweak - Added an indicator message to the Invoice+ VAT Settings to notify users when the WooCommerce taxes feature is enabled.
+
 ## [7.4.5] - 06-01-2025 - (Gol D. Roger)
 
 - Fix   - If the main VAT settings in Invoice+ are unchecked, the vat-type-exempt will now be sent.

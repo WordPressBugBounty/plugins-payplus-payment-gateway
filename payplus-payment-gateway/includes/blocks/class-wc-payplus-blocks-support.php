@@ -242,9 +242,16 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
         WC()->session->set('randomHash', $randomHash);
         $data->more_info = $order_id === "000" ? $randomHash : $order_id;
         $shippingPrice = 0;
-        if ($order_id !== "000") {
+        if ($order_id !== "000" && isset($order) && $order) {
             WC()->session->set('order_awaiting_payment', $order_id);
             $shipping_items = $order->get_items('shipping');
+            if ($WC_PayPlus_Gateway->add_product_field_transaction_type) {
+                if ($WC_PayPlus_Gateway->payplus_check_all_product($order, "2")) {
+                    $data->charge_method = 2;
+                } elseif ($WC_PayPlus_Gateway->payplus_check_all_product($order, "1")) {
+                    $data->charge_method = 1;
+                }
+            }
             // Check if there are shipping items
             if (! empty($shipping_items)) {
                 foreach ($shipping_items as $shipping_item) {
@@ -554,7 +561,7 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
             'multiPassIcons' => WC_PayPlus_Statics::getMultiPassIcons(),
             'isSubscriptionOrder' => $isSubscriptionOrder,
             'isAutoPPCC' => $this->isAutoPPCC,
-            'importApplePayScript' => $this->importApplePayScript  && !wp_script_is('applePayScript', 'enqueued')  ? PAYPLUS_PLUGIN_URL . 'assets/js/script.js' . '?var=' . PAYPLUS_VERSION : false,
+            'importApplePayScript' => $this->importApplePayScript  && !wp_script_is('applePayScript', 'enqueued')  ? PAYPLUS_PLUGIN_URL . 'assets/js/script.js' . '?ver=' . PAYPLUS_VERSION : false,
             "{$this->name}-settings" => [
                 'displayMode' => $this->displayMode !== 'default' ? $this->displayMode : $this->payPlusSettings['display_mode'],
                 'iFrameHeight' => $this->iFrameHeight . 'px',
