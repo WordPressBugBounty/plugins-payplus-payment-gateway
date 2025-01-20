@@ -326,10 +326,10 @@ $numPaymentsAllowed = max(1, min($numPaymentsAllowed, 99)); // Enforce max 99 an
                     /* Optional, removes default opacity in some browsers */
                 }
 
-                input {
+                /* input {
                     background-color: white !important;
                     outline: unset;
-                }
+                } */
 
                 .form-control {
                     width: 100% !important;
@@ -588,15 +588,8 @@ $numPaymentsAllowed = max(1, min($numPaymentsAllowed, 99)); // Enforce max 99 an
                             if (is_array($hostedIcons) && !empty($hostedIcons)) {
                                 foreach ($hostedIcons as $hIcon) {
                             ?><img class="hf-image" style="height:19px" src="<?php echo esc_url($hIcon); ?>"
-                                        alt="<?php echo esc_attr($ccImageAltText); ?>" /><?php
-                                                                                        }
-                                                                                    } else {
-                                                                                            ?><img class="hf-image"
-                                    src="<?php echo esc_url($ccImage); ?>"
-                                    alt="<?php echo esc_attr($ccImageAltText); ?>" /><?php
-                                                                                    }
-                                                                                        ?>
-
+                                        alt="<?php echo esc_attr($ccImageAltText); ?>" /><?php }
+                                                                                    }  ?>
                         </div>
                     </div>
                     <div id="card-holder-name-wrapper" class="fld-wrapper">
@@ -666,7 +659,8 @@ $numPaymentsAllowed = max(1, min($numPaymentsAllowed, 99)); // Enforce max 99 an
                         </select>
                     </div>
                     <input type="button" value="<?php echo esc_attr__('Place Order', 'payplus-payment-gateway'); ?>"
-                        id="submit-payment" class="btn btn-primary" />
+                        id="submit-payment" class="btn btn-primary"
+                        onclick="jQuery('form[name=\'checkout\']').trigger('submit');" />
                     <br />
                     <div class="payment-error-message">
                         <div class="loader-container">

@@ -57,7 +57,7 @@ jQuery(function ($) {
         if (hasSavedCCs.length === 0) {
             setTimeout(function () {
                 $("input#" + inputPayPlus).prop("checked", true);
-                $("#submit-payment").hide();
+                // $("#submit-payment").hide();
                 $("div.container.hostedFields").show();
             }, 2000);
         } else {
@@ -69,7 +69,7 @@ jQuery(function ($) {
                 $("input#" + inputPayPlus).prop("checked", false);
                 if ($("input#" + inputPayPlus).prop("checked")) {
                     $("div.container.hostedFields").show();
-                    $("#submit-payment").hide();
+                    //   $("#submit-payment").hide();
                 }
                 const mainPayPlus = "payment_method_payplus-payment-gateway";
                 $("input#" + mainPayPlus).prop("checked", true);
@@ -78,13 +78,13 @@ jQuery(function ($) {
         $(document).on("change", 'input[name="payment_method"]', function () {
             // Check if the hosted fields radio input is NOT checked
             if (!$("input#" + inputPayPlus).is(":checked")) {
-                $("#submit-payment").hide();
+                // $("#submit-payment").hide();
                 $("div.container.hostedFields").show();
                 $(".container.hostedFields").hide();
                 // $("button#place_order").show();
             } else {
                 $("div.container.hostedFields").show();
-                $("#submit-payment").hide();
+                // $("#submit-payment").hide();
             }
         });
     }

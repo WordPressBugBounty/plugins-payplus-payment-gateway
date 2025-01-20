@@ -19,7 +19,7 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
     public $isHideLoaderLogo;
     public $isHostedStarted;
     public $isPlaceOrder;
-    // public $hostedFieldsResponse;
+    public $showSubmitButton;
 
 
     /**
@@ -38,6 +38,7 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $this->order_id = $order_id;
         $this->order = $order;
         $this->isPlaceOrder = $isPlaceOrder;
+        $this->showSubmitButton = isset($this->payPlusGateway->hostedFieldsOptions['show_hide_submit_button']) && $this->payPlusGateway->hostedFieldsOptions['show_hide_submit_button'] === 'yes';
 
         define('API_KEY', $this->apiKey);
         define('SECRET_KEY', $this->secretKey);
@@ -102,6 +103,7 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
                     'ajax_url' => admin_url('admin-ajax.php'),
                     "saveCreditCard" => __("Save credit card in my account", "payplus-payment-gateway"),
                     'testMode' => $this->testMode,
+                    "showSubmitButton" => $this->showSubmitButton,
                     'allErrors' => $payPlusErrors->getAllTranslations(),
                     'frontNonce' => wp_create_nonce('frontNonce'),
                     'payPlusLogo' => PAYPLUS_PLUGIN_URL . 'assets/images/PayPlusLogo.svg',
@@ -360,9 +362,11 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         WC()->session->set('hostedPayload', $payload);
 
         $order = wc_get_order($order_id);
+        $hostedFieldsUUID = WC()->session->get('hostedFieldsUUID');
+
         if ($order) {
             $this->isPlaceOrder ? $this->payplus_gateway->payplus_add_log_all("hosted-fields-data", "Updating Order #:$order_id") : null;
-            $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", "HostedFields-hostedFieldsData-after update Payload: \n$payload");
+            $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", "HostedFields-hostedFieldsData-after update Payload: \n$payload\nhostedFieldsUUID: $hostedFieldsUUID");
             $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload, $this->isPlaceOrder);
         } else {
             $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload, $this->isPlaceOrder = false);
