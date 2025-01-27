@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.5.2
+ * Version: 7.5.3
  * Tested up to: 6.7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.5.2');
-define('PAYPLUS_VERSION_DB', 'payplus_5_1');
+define('PAYPLUS_VERSION', '7.5.3');
+define('PAYPLUS_VERSION_DB', 'payplus_5_2');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -38,6 +38,7 @@ class WC_PayPlus
     public $hostedFieldsOptions;
     private $isHostedInitiated = false;
     public $secret_key;
+    public $shipping_woo_js;
 
     /**
      * The main PayPlus gateway instance. Use get_main_payplus_gateway() to access it.
@@ -53,6 +54,7 @@ class WC_PayPlus
     {
         //ACTION
         $this->payplus_payment_gateway_settings = (object) get_option('woocommerce_payplus-payment-gateway_settings');
+        $this->shipping_woo_js = property_exists($this->payplus_payment_gateway_settings, 'shipping_woo_js') && $this->payplus_payment_gateway_settings->shipping_woo_js === "yes" ? true : false;
         $this->hostedFieldsOptions = get_option('woocommerce_payplus-payment-gateway-hostedfields_settings');
         $this->applePaySettings = get_option('woocommerce_payplus-payment-gateway-applepay_settings');
         $this->isApplePayGateWayEnabled = boolval(isset($this->applePaySettings['enabled']) && $this->applePaySettings['enabled'] === "yes");
@@ -751,6 +753,7 @@ class WC_PayPlus
                                     "payment_url_google_pay_iframe" => $payment_url_google_pay_iframe,
                                     'ajax_url' => admin_url('admin-ajax.php'),
                                     'frontNonce' => wp_create_nonce('frontNonce'),
+                                    'isShippingWooJs' => $this->shipping_woo_js,
                                 ]
                             );
                             wp_enqueue_script('payplus-front-js');

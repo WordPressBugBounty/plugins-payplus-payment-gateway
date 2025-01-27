@@ -1876,7 +1876,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         }
 
         // YourMoment Split Shipping
-        if (WC()->session && WC()->session->has_session()) {
+        if ((isset($options['enable_dev_mode']) && $options['enable_dev_mode'] === "yes") && (WC()->session && WC()->session->has_session())) {
             $shipping_splitted = WC()->session->get('shipping_splitted');
             // Handle the case where 'shipping_splitted' is null
             if (is_null($shipping_splitted)) {
@@ -1915,23 +1915,6 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 $totalCartAmount += $productPrice;
             }
         }
-
-        // YourMoment Split Shipping
-        if ($shipping_splitted) {
-            $orderTotal = $order->get_total();
-            if ($totalCartAmount < $orderTotal) {
-                $productPrice = number_format($orderTotal - $totalCartAmount, 2, '.', '');
-                $itemDetails = [
-                    'name' => __('Shipping', 'payplus-payment-gateway'),
-                    'quantity' => 1,
-                    'price' => $productPrice,
-                ];
-                $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
-                $totalCartAmount += $productPrice;
-            }
-        }
-        // YourMoment Split Shipping
-
         // coupons
 
         if (!$isAdmin && $order->get_total_discount()) {
@@ -1972,6 +1955,24 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             ];
             $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
             $totalCartAmount += $priceGift;
+        }
+
+        if (isset($options['enable_dev_mode']) && $options['enable_dev_mode'] === "yes") {
+            // YourMoment Split Shipping
+            if ($shipping_splitted) {
+                $orderTotal = $order->get_total();
+                if ($totalCartAmount < $orderTotal) {
+                    $productPrice = number_format($orderTotal - $totalCartAmount, 2, '.', '');
+                    $itemDetails = [
+                        'name' => __('Shipping', 'payplus-payment-gateway'),
+                        'quantity' => 1,
+                        'price' => $productPrice,
+                    ];
+                    $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+                    $totalCartAmount += $productPrice;
+                }
+            }
+            // YourMoment Split Shipping
         }
 
         $totalCartAmount = round($totalCartAmount, $this->rounding_decimals);
