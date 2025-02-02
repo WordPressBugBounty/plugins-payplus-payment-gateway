@@ -137,14 +137,56 @@ class WC_PayPlus_Form_Fields
         if (current_user_can('edit_shop_orders')) {
             $nonce = wp_create_nonce('payPlusOrderChecker');
 ?>
-            <form method="post" action="">
-                <button name="verifyPayPlusOrders" value="<?php echo esc_attr($nonce); ?>">Run PayPlus orders verifier</button>
-            </form>
+            <div class="wrap">
+                <h1>PayPlus Orders Validator</h1>
+                <p>Click the button below to run the PayPlus Orders Validator.</p>
+                <p>
+                    This will check all orders created within the last day are in "pending", "failed" or "cancelled" status and
+                    contain "payplus_page_request_uid". It verifies the PayPlus IPN Process and sets the correct status if needded.
+                </p>
+                <?php
+                $payPlusSettings = get_option('woocommerce_payplus-payment-gateway_settings');
+
+                if (isset($payPlusSettings['enable_dev_mode']) && $payPlusSettings['enable_dev_mode'] === "yes") { ?>
+                    <p>
+                        <strong>Advanced: </strong>
+                        <br>
+                        To run with special options … add to the url :
+                        <br>
+                        Usage of query parameters:
+                        <br>
+                        month - number 1 to 12
+                        <br>
+                        year - number
+                        <br>
+                        forceInvoice - boolean - true or false - will run ipn even if the response from payplus in the order exists and
+                        has a status of success. Will not run if an invoice was already created.
+                        <br>
+                        forceAll - boolean - true or false - will run ipn even if the response from payplus in the order exists and
+
+                        forceAll must be joined with month.
+                        <br>
+                    <h2>WARNING: The usage of forceAll is not recommended! - If forceAll is used then even orders that were
+                        manually
+                        changed to a certain status will be synced to the IPN data.</h2>
+
+                    For example:
+                    <br>
+
+                    <strong>https://wordpresspp.test/wp-admin/admin.php?page=runPayPlusOrdersChecker&month=10&year=2024&forceInvoice=true</strong>
+                    </p>
+                    <h2>RECOMMENDED: JUST click the button below to run the default: Check ALL orders from today.</h2>
+                <?php
+                } ?>
+                <form method="post" action="">
+                    <button name="verifyPayPlusOrders" value="<?php echo esc_attr($nonce); ?>">Run PayPlus orders verifier</button>
+                </form>
+            </div>
 <?php
             if (isset($_POST['verifyPayPlusOrders'])) { // phpcs:ignore WordPress.Security.NonceVerification.Missing
                 $nonce = sanitize_text_field(wp_unslash($_POST['verifyPayPlusOrders'])); // phpcs:ignore WordPress.Security.NonceVerification.Missing
                 echo '<pre>';
-                echo 'Running PayPlus Order checker... - you can check : payplus-orders-verify-log and payplus-ipn log for more information.';
+                echo 'Running PayPlus Order checker...';
                 $payPlusGateway = new WC_PayPlus_Gateway;
                 $payPlusGateway->payPlusOrdersCheck($nonce);
             }
@@ -469,6 +511,14 @@ class WC_PayPlus_Form_Fields
             'advanced_title' => [
                 'title' => __('PayPlus Advanced Features', 'payplus-payment-gateway'),
                 'type' => 'title',
+            ],
+            'show_get_payplus_data_buttons' => [
+                'title' => __('Always display Get PayPlus Data Buttons', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'default' => 'no',
+                'description' => __('Always display Get PayPlus Data Buttons - Regardless of orders status.', 'payplus-payment-gateway'),
+                'label' => __('Get PayPlus Data Buttons Always', 'payplus-payment-gateway'),
+                'desc_tip' => true,
             ],
             'show_payplus_integrity_check' => [
                 'title' => __('Show PayPlus Hash Check button', 'payplus-payment-gateway'),

@@ -594,7 +594,7 @@ jQuery(function ($) {
                             }
                             $(key).unblock();
                             if (typeof newPpShippingMethods !== "undefined") {
-                                createNewShippingMethods ();
+                                createNewShippingMethods();
                             }
                         });
                         if (payplus_script_checkout.isHostedFields) {
@@ -672,7 +672,7 @@ jQuery(function ($) {
                                     "#payment > ul > li.wc_payment_method.payment_method_payplus-payment-gateway-hostedfields > div.pp_iframe_h > div"
                                 ).style.display = "block";
                             }
-                        }, 3000);
+                        }, 2000);
 
                         var $paymentMethod = jQuery("#" + inputPayPlus);
 
@@ -901,33 +901,14 @@ jQuery(function ($) {
                                         hostedPayload.more_info &&
                                         !isNaN(hostedPayload.more_info)
                                     ) {
-                                        // console.log(hostedPayload);
-                                        let totalElement =
-                                            document.querySelector(
-                                                "#order_review > table > tfoot > tr.order-total > td > strong > span > bdi"
-                                            );
-                                        if (totalElement) {
-                                            let totalText =
-                                                totalElement.innerText;
-                                            let totalAmount = totalText.replace(
-                                                /[^0-9.]/g,
-                                                ""
-                                            );
-                                            //   console.log(totalAmount);
-                                            if (
-                                                Number(hostedPayload.amount) ===
-                                                Number(totalAmount)
-                                            ) {
-                                                overlay();
-                                                jQuery(
-                                                    ".blocks-payplus_loader_hosted"
-                                                ).fadeIn();
-                                                wc_checkout_form.$checkout_form
-                                                    .removeClass("processing")
-                                                    .unblock();
-                                                hf.SubmitPayment();
-                                            }
-                                        }
+                                        overlay();
+                                        jQuery(
+                                            ".blocks-payplus_loader_hosted"
+                                        ).fadeIn();
+                                        wc_checkout_form.$checkout_form
+                                            .removeClass("processing")
+                                            .unblock();
+                                        hf.SubmitPayment();
                                     } else {
                                         window.onbeforeunload = null; // If `onbeforeunload` is set directly
                                         window.removeEventListener(
@@ -1353,7 +1334,7 @@ jQuery(function ($) {
             var $hostedDiv = $("<div></div>", {
                 class: "payplus-checkout-image-container", // Optional: Add a class to the div
                 id: "payplus-checkout-image-div", // Optional: Add an ID to the div
-                style: "display: flex;",
+                style: "display: flex;flex-wrap: wrap;justify-content: center;", // Optional: Add inline styles
             });
             $.each(
                 payplus_script_checkout.customIcons,

@@ -75,6 +75,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     public $api_url;
     public $payment_url;
     public $ipn_url;
+    public $invoice_search;
     public $refund_url;
     public $clearing_companies_url;
     public $issuers_companies_url;
@@ -100,6 +101,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     private $current_time;
     public $hostedFieldsOptions;
     public $isHostedEnabled;
+    public $enableDevMode;
 
     /**
      *
@@ -157,6 +159,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->single_quantity_per_line = $this->get_option('single_quantity_per_line');
 
         // - PayPlus Payment Options
+        $this->enableDevMode = $this->get_option('enable_dev_mode') == 'yes' ? true : false;
         $this->hide_icon = $this->get_option('hide_icon');
         $this->transaction_type = $this->get_option('transaction_type');
         $this->disable_woocommerce_scheduler = $this->get_option('disable_woocommerce_scheduler');
@@ -218,6 +221,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->api_url = ($this->api_test_mode) ? PAYPLUS_PAYMENT_URL_DEV : PAYPLUS_PAYMENT_URL_PRODUCTION;
         $this->payment_url = $this->api_url . 'PaymentPages/generateLink';
         $this->ipn_url = $this->api_url . 'PaymentPages/ipn';
+        $this->invoice_search = $this->api_url . 'books/docs/list';
         $this->refund_url = $this->api_url . 'Transactions/RefundByTransactionUID';
         $this->clearing_companies_url = $this->api_url . 'ClearingCompanies';
         $this->issuers_companies_url = $this->api_url . 'issuerscompanies';
@@ -408,71 +412,202 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         if (!current_user_can('edit_shop_orders')) {
             wp_die('Sorry this page is not allowed! - payPlusOrdersCheck user privileges.');
         }
+        $domain = explode("//", home_url())[1];
+        $query = isset($_SERVER['REQUEST_URI']) ? wp_parse_url(sanitize_text_field(wp_unslash($_SERVER['REQUEST_URI'])), PHP_URL_QUERY) : "";
+        $fileName = str_replace("=true", "", str_replace("page=runPayPlusOrdersChecker&", "", $query));
+        $fileName = str_replace('&', '-', "$domain.$fileName");
 
         $current_time = current_time('Y-m-d H:i:s');
 
         // Extract the current hour and minute
         $current_hour = gmdate('H', strtotime($current_time));
         $current_minute = gmdate('i', strtotime($current_time));
+        $m = isset($_GET['month']) ? sanitize_text_field(wp_unslash($_GET['month'])) : gmdate('m');
+        $Y = isset($_GET['year']) ? sanitize_text_field(wp_unslash($_GET['year'])) : gmdate('Y');
+        $forceInvoice = isset($_GET['forceInvoice']) ? boolval(sanitize_text_field(wp_unslash($_GET['forceInvoice'])) === "true" && $this->enableDevMode) : false;
+        $forceAll = isset($_GET['forceAll']) ? boolval(sanitize_text_field(wp_unslash($_GET['forceAll'])) === "true" && $this->enableDevMode) : false;
+        $invoiceReport = isset($_GET['invoiceReport']) ? boolval(sanitize_text_field(wp_unslash($_GET['invoiceReport'])) === "true" && $this->enableDevMode) : false;
+        $cancelledOnly = isset($_GET['cancelledOnly']) ? boolval(sanitize_text_field(wp_unslash($_GET['cancelledOnly'])) === "true" && $this->enableDevMode) : false;
+        $pendingOnly = isset($_GET['pendingOnly']) ? boolval(sanitize_text_field(wp_unslash($_GET['pendingOnly'])) === "true" && $this->enableDevMode) : false;
+        $reportOnly = isset($_GET['reportOnly']) ? boolval(sanitize_text_field(wp_unslash($_GET['reportOnly'])) === "true" && $this->enableDevMode) : false;
+
+        echo "<pre>";
+        if (isset($_GET['month'])) {
+            // Get start and end dates for the given month
+            $start_date = gmdate('Y-m-01 00:00:00', strtotime("$Y-$m-01"));
+            $end_date = gmdate('Y-m-t 23:59:59', strtotime("$Y-$m-01")); // Last day of the month
+            echo esc_html("Start date: $start_date\n");
+            echo esc_html("End date: $end_date\n");
+            $dateOrDates = $start_date . '...' . $end_date;
+        } else {
+            $dateOrDates = $current_time;
+            echo esc_html("Date to check: " . substr($current_time, 0, 10) . "\n");
+        }
+
+        $status = !$invoiceReport ? ['pending', 'cancelled', 'failed'] : ['pending', 'cancelled', 'failed', 'completed', 'processing', 'on-hold'];
+        $status = isset($_GET['failedOnly']) && boolval(sanitize_text_field(wp_unslash($_GET['failedOnly'])) === "true") ? 'failed' : $status;
+        $status = $cancelledOnly ? 'cancelled' : $status;
+        $status = $pendingOnly ? 'pending' : $status;
+
+        $getInvoice = $invoiceReport ? true : false;
+        !$getInvoice ? $ipnMessage = "RUNNING IPN! - Check order notes and status for results!" : $ipnMessage = "RUNNING Invoice+ call! - Check order notes and status for results!";
+
 
         $args = array(
-            'status' => ['pending', 'cancelled'],
-            'date_created' => $current_time,
-            'return' => 'ids', // Just return IDs to save memory
+            'status'       => $status,
+            'date_created' => $dateOrDates, // Correct range format for WooCommerce
+            'return'       => 'ids', // Just return IDs to save memory
+            'limit'        => -1, // Retrieve all orders
         );
 
         $orders = array_reverse(wc_get_orders($args));
+        $howManyOrders = count($orders);
+        $outPut = [];
+
         if (count($orders)) {
-            echo '<pre>';
-            echo "The following orders were created today and are in pending status: <br>";
-            echo "(This will not cancel the scheduled cron event)<br><br>";
+            echo "\nThe following orders will be processed: <br>";
+            echo esc_html("Total orders: $howManyOrders\n");
+            echo "This will not cancel the scheduled cron event\n\n";
+            ob_start(); // Start output buffering
             echo "Orders: ";
-            echo esc_html(implode(",", $orders)) . "<br></br>";
+            echo esc_html(implode(",", $orders)) . "\n";
             $this->payplus_add_log_all('payplus-orders-verify-log', '~=> payPlusOrdersCheck <=~ process started: ' . wp_json_encode($orders), 'default');
             foreach ($orders as $order_id) {
+                $outPut[$order_id]['force_all'] = $forceAll;
+                $outPut[$order_id]['statuses'] = $status;
                 $order = wc_get_order($order_id);
                 $hour = $order->get_date_created()->date('H');
                 $min = $order->get_date_created()->date('i');
                 $calc = $current_minute - $min;
                 $runIpn = true;
                 $paymentPageUid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid') !== "" ? WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid') : false;
-                $payPlusCronTested = !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_cron_tested')) ? WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_cron_tested') : 1;
-                if ($paymentPageUid && $payPlusCronTested < 5) {
-                    ++$payPlusCronTested;
-                    WC_PayPlus_Meta_Data::update_meta($order, ['payplus_cron_tested' => $payPlusCronTested]);
-                    echo esc_html("Order #$order_id status:" . $order->get_status() . "\n");
-                    if ($order->get_status() === 'cancelled') {
-                        $payPlusResponse = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response');
-                        if (WC_PayPlus_Statics::pp_is_json($payPlusResponse)) {
-                            $responseStatus = json_decode($payPlusResponse, true)['status_code'];
-                            if ($responseStatus === "000") {
-                                echo esc_html("\n-=<Order: $order_id>=-\n");
-                                echo "---------------------------------------------------\n";
-                                echo "ATTENTION: The order was created and paid for succcessfully\n";
-                                echo "ATTENTION: The order was edited to cancelled manually.\n";
-                                echo "NOT Running ipn check.\n";
-                                echo "---------------------------------------------------\n";
-                                $runIpn = false;
+                echo esc_html("\nOrder #$order_id CURRENT STATUS: " . $order->get_status() . "\n");
+                if ($paymentPageUid) {
+                    $hasInvoice = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_check_invoice_send');
+                    $payPlusResponse = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response');
+                    if ($hasInvoice) {
+                        $outPut[$order_id]['has_invoice'] = $hasInvoice;
+                    }
+                    if (WC_PayPlus_Statics::pp_is_json($payPlusResponse) && !$forceAll) {
+                        $responseStatus = json_decode($payPlusResponse, true)['status_code'];
+                        if ($responseStatus === "000") {
+                            $outPut[$order_id]['response_status'] = $responseStatus;
+                            $runIpn = false;
+                            echo esc_html("Order #$order_id contains payment page uid! and has a payplus_response object with success! [The order status was edited manually] - SKIPPING IPN!\n");
+                            $outPut[$order_id]['message_response'] = "Order #$order_id contains payment page uid! and has a payplus_response object with success! [The order status was edited manually] - SKIPPING IPN!";
+                            $order_customer = $order->get_billing_first_name() . ' ' . $order->get_billing_last_name();
+                            $order_phone = $order->get_billing_phone();
+                            echo esc_html("Order #$order_id Customer: $order_customer\n");
+                            echo esc_html("Order #$order_id Phone: $order_phone\n");
+                            $outPut[$order_id]['customer'] = $order_customer;
+                            $outPut[$order_id]['phone'] = $order_phone;
+                            if ($hasInvoice) {
+                                echo esc_html("The order has an invoice on PayPlus!\n\n");
+                                $outPut[$order_id]['message_invoice'] = "The order has an invoice on PayPlus!";
+                            } else {
+                                echo esc_html("THE ORDER DOES NOT have an invoice on PayPlus!\n\n");
+                                $outPut[$order_id]['message_invoice'] = "THE ORDER DOES NOT have an invoice on PayPlus!";
                             }
                         }
+                    } elseif (!$forceAll) {
+                        $forceInvoice ? $runIpn = true : null;
+                        if ($hasInvoice) {
+                            $runIpn = false;
+                            echo esc_html("Order #$order_id contains payment page uid! HAS AN INVOICE! - SKIPPING IPN!\n");
+                            $outPut[$order_id]['message_invoice'] = "Order #$order_id contains payment page uid! HAS AN INVOICE! - SKIPPING IPN!";
+                        }
                     }
-                    if ($runIpn === true) {
-                        echo esc_html("Order #$order_id contains payment page uid - running ipn! - check order notes and status for results!");
+                    if ($runIpn) {
+                        echo esc_html("Order #$order_id - $ipnMessage");
+                        $outPut[$order_id]['message'] = $ipnMessage;
                         echo "\n";
                         $this->payplus_add_log_all('payplus-orders-verify-log', "$order_id: Running IPN validation.\n");
                         $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
                         $_wpnonce = wp_create_nonce('_wp_payplusIpn');
-                        $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce);
+
+                        $ipnResponse = !$reportOnly ? $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce, $saveToken = false, $isHostedPayment = false, $allowUpdateStatuses = true, $allowReturn = true, $getInvoice) : $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce, $saveToken = false, $isHostedPayment = false, $allowUpdateStatuses = false, $allowReturn = true, $getInvoice);
+                        if ($ipnResponse) {
+                            if ($getInvoice && is_array($ipnResponse)) {
+                                echo esc_html("Order #$order_id invoices: " . wp_json_encode($ipnResponse) . "\n\n");
+                                $outPut[$order_id]['invoices'] = $ipnResponse;
+                            } else {
+                                if ($getInvoice) {
+                                    echo esc_html("Order #$order_id doesn't seem to have invoice+ docs...\n\n");
+                                    $outPut[$order_id]['message_invoices'] = "Order #$order_id doesn't seem to have invoice+ docs...";
+                                } else {
+                                    echo esc_html("Order #$order_id status changed to: $ipnResponse\n\n");
+                                    $outPut[$order_id]['status_change'] = $ipnResponse;
+                                }
+                            }
+                        } else {
+                            echo esc_html("Order #$order_id status did not change!\n\n");
+                            $outPut[$order_id]['status_change'] = "Order #$order_id status did not change!";
+                        }
                     }
-                }
-                if ($payPlusCronTested >= 3) {
-                    echo esc_html("$order_id - Was already tested at least once - payplus_cron_tested = $payPlusCronTested.\n");
+                } else {
+                    if ($getInvoice) {
+                        echo esc_html("Order #$order_id does not contain payment page uid! - SKIPPING Invoice+ Call!\n\n");
+                        $outPut[$order_id]['message_invoice'] = "Order #$order_id does not contain payment page uid! - SKIPPING Invoice+ Call!";
+                    } else {
+                        echo esc_html("Order #$order_id does not contain payment page uid! - SKIPPING IPN!\n");
+                        $outPut[$order_id]['message'] = "Order #$order_id does not contain payment page uid! - SKIPPING IPN!";
+                    }
                 }
             }
         } else {
             echo "<pre>";
             wp_die('No orders matching the criteria were found.');
         }
+
+        $output = ob_get_clean(); // Get the buffered content and clean the buffer
+        // Display the output
+        echo esc_html($output);
+
+        // Add a button to save the output text
+        echo '<button id="saveOutputButton">Save Output</button>';
+
+        // Add JavaScript to handle the button click and save the output text
+        echo '<script>
+                        document.getElementById("saveOutputButton").addEventListener("click", function() {
+                            var outputText = ' . wp_json_encode($output) . ';
+                            var blob = new Blob([outputText], { type: "text/plain;charset=utf-8" });
+                            var link = document.createElement("a");
+                            link.href = URL.createObjectURL(blob);
+                            link.download = "' . esc_html($fileName) . '.txt";
+                            link.click();
+                        });
+                    </script>';
+        // Add a button to download the $outPut array in Excel format
+        echo '<button id="downloadExcelButton">Download Excel</button>';
+
+        // Add JavaScript to handle the button click and download the Excel file
+        echo '<script>
+            document.getElementById("downloadExcelButton").addEventListener("click", function() {
+                var outputData = ' . wp_json_encode($outPut) . ';
+                if (Object.keys(outputData).length === 0) {
+                    alert("No data available to download.");
+                    return;
+                }
+                var csvContent = "";
+                var headers = ["order_id"].concat(Object.keys(outputData[Object.keys(outputData)[0]])); // Add order_id as the first header
+                csvContent += headers.join(",") + "\\n"; // Add headers
+
+                Object.keys(outputData).forEach(function(orderId) {
+                    var order = outputData[orderId];
+                    var row = [orderId].concat(headers.slice(1).map(function(header) {
+                        return order[header] || "";
+                    })).join(",");
+                    csvContent += row + "\\n";
+                });
+                
+                var encodedUri = "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent);
+                var link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", "' . esc_html($fileName) . '.csv");
+                document.body.appendChild(link);
+                link.click();
+            });
+            </script>';
     }
 
     /**
@@ -2385,6 +2520,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         global $wpdb;
         $order = wc_get_order($order_id);
         $json = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_callback_response');
+        $payPlusResponse = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response');
         $response = json_decode($json, true);
         $indexRow = 0;
         $tblname = $wpdb->prefix . 'payplus_payment_process';
@@ -2426,33 +2562,15 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $transactionUid = sanitize_text_field($response['transaction']['uid']);
             $status_code = sanitize_text_field($response['transaction']['status_code']);
 
-            if ($order->get_status() === "pending") {
+            if (empty($payPlusResponse)) {
                 if ($status_code === "000") {
-                    if ($response['transaction_type'] == "Charge") {
-                        if ($this->fire_completed && $this->successful_order_status === 'default-woo') {
-                            WC_PayPlus_Meta_Data::sendMoreInfo($order, 'process_payment->firePaymentComplete', $transactionUid);
-                            $order->payment_complete();
-                            $this->payplus_add_log_all(
-                                'payplus_callback_secured',
-                                "Order # $order_id Running Woocommerce payment complete process."
-                            );
-                        }
-                        if ($this->successful_order_status !== 'default-woo') {
-                            WC_PayPlus_Meta_Data::sendMoreInfo($order,  'process_payment->' . $this->successful_order_status, $transactionUid);
-                            $order->update_status($this->successful_order_status);
-                            $this->payplus_add_log_all(
-                                'payplus_callback_secured',
-                                "Updating order #$order_id status to: $this->successful_order_status"
-                            );
-                        }
-                    } else {
-                        WC_PayPlus_Meta_Data::sendMoreInfo($order,  'process_payment->wc-on-hold', $transactionUid);
-                        $order->update_status('wc-on-hold');
-                        $this->payplus_add_log_all(
-                            'payplus_callback_secured',
-                            "Updating order #$order_id status to: wc-on-hold"
-                        );
-                    }
+                    $this->payplus_add_log_all(
+                        'payplus_callback_secured',
+                        'Running standard payPlusIpn function to retrieve the payment details.'
+                    );
+                    $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
+                    $_wpnonce = wp_create_nonce('_wp_payplusIpn');
+                    $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce, false, false, false);
                 }
             }
 
@@ -2530,6 +2648,36 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     array('%d'),
                     array('%d')
                 );
+            }
+
+            if ($order->get_status() === "pending") {
+                if ($status_code === "000") {
+                    if ($response['transaction_type'] == "Charge") {
+                        if ($this->fire_completed && $this->successful_order_status === 'default-woo') {
+                            WC_PayPlus_Meta_Data::sendMoreInfo($order, 'process_payment->firePaymentComplete', $transactionUid);
+                            $order->payment_complete();
+                            $this->payplus_add_log_all(
+                                'payplus_callback_secured',
+                                "Order # $order_id Running Woocommerce payment complete process."
+                            );
+                        }
+                        if ($this->successful_order_status !== 'default-woo') {
+                            WC_PayPlus_Meta_Data::sendMoreInfo($order,  'process_payment->' . $this->successful_order_status, $transactionUid);
+                            $order->update_status($this->successful_order_status);
+                            $this->payplus_add_log_all(
+                                'payplus_callback_secured',
+                                "Updating order #$order_id status to: $this->successful_order_status"
+                            );
+                        }
+                    } else {
+                        WC_PayPlus_Meta_Data::sendMoreInfo($order,  'process_payment->wc-on-hold', $transactionUid);
+                        $order->update_status('wc-on-hold');
+                        $this->payplus_add_log_all(
+                            'payplus_callback_secured',
+                            "Updating order #$order_id status to: wc-on-hold"
+                        );
+                    }
+                }
             }
         }
     }
