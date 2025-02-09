@@ -206,6 +206,7 @@ function updateApplePayConfig(
     currentShippingIdentifier = formattedtShippingArray.length
         ? formattedtShippingArray[0]?.identifier
         : "";
+    console.log(applePayConfig.shippingMethods);
 }
 
 function updateLineItems() {
@@ -533,9 +534,9 @@ function formattedShipping(countryCode, total, withTax = false) {
                 parseFloat(item.cost_without_tax || 0),
         }));
     }
-
     return { newShippingOptionsForApple, newShippingOptionsForPayPlus };
 }
+
 async function getTotalPriceCart() {
     return new Promise((resolve) => {
         const btnCart = jQuery(".single_add_to_cart_button");
@@ -811,7 +812,11 @@ window.addEventListener("message", async function (event) {
                     ],
                 };
             }
-            if (payplus_script.isShippingWooJs) {
+            if (
+                payplus_script.isShippingWooJs &&
+                newPpShippingMethods &&
+                newPpShippingMethods.all.length > 0
+            ) {
                 shipping = newPpShippingMethods;
             }
             if (window.location.host == "localhost") {

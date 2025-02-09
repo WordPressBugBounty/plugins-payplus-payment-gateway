@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.5.5
+ * Version: 7.5.6
  * Tested up to: 6.7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.5.5');
-define('PAYPLUS_VERSION_DB', 'payplus_5_4');
+define('PAYPLUS_VERSION', '7.5.6');
+define('PAYPLUS_VERSION_DB', 'payplus_5_5');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -1024,25 +1024,30 @@ class WC_PayPlus
                 $payplusGenHash = base64_encode(hash_hmac('sha256', $json, $this->secret_key, true));
 
                 if ($payplusGenHash === $payplusHash) {
+                    $this->payplus_gateway = $this->get_main_payplus_gateway();
                     $order_id = intval($response['transaction']['more_info']);
                     $order = wc_get_order($order_id);
                     WC_PayPlus_Meta_Data::update_meta($order, ['payplus_callback_response' => $json]);
                     // Add a delayed event
-                    $this->schedule_delayed_event($order_id);
-                }
-                $response = array(
-                    'status' => 'success',
-                    'message' => 'PayPlus callback function ended.',
-                );
+                    $this->payplus_gateway->payplus_add_log_all(
+                        'payplus_callback_secured',
+                        "\nPayPlus order # $order_id STARTING CALLBACK FUNCTION:"
+                    );
+                    $this->payplus_gateway->legacy_callback_response($order_id);
+                    $response = array(
+                        'status' => 'success',
+                        'message' => 'PayPlus callback function ended.',
+                    );
 
-                wp_die(
-                    wp_json_encode($response),
-                    '',
-                    array(
-                        'response' => 200,
-                        'content_type' => 'application/json'
-                    )
-                );
+                    wp_die(
+                        wp_json_encode($response),
+                        '',
+                        array(
+                            'response' => 200,
+                            'content_type' => 'application/json'
+                        )
+                    );
+                }
             }
 
             /**

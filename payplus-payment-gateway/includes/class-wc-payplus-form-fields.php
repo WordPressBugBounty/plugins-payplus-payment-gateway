@@ -138,57 +138,389 @@ class WC_PayPlus_Form_Fields
             $nonce = wp_create_nonce('payPlusOrderChecker');
 ?>
             <div class="wrap">
-                <h1>PayPlus Orders Validator</h1>
-                <p>Click the button below to run the PayPlus Orders Validator.</p>
+                <h1>PayPlus Orders Reports/Validator</h1>
+                <!-- <p>Click the button below to run the PayPlus Orders Validator.</p>
                 <p>
                     This will check all orders created within the last day are in "pending", "failed" or "cancelled" status and
                     contain "payplus_page_request_uid". It verifies the PayPlus IPN Process and sets the correct status if needded.
-                </p>
+                </p> -->
                 <?php
                 $payPlusSettings = get_option('woocommerce_payplus-payment-gateway_settings');
+                $enableDevMode = isset($payPlusSettings['enable_dev_mode']) && $payPlusSettings['enable_dev_mode'] === 'yes';
+                $enableOrdersTable = isset($payPlusSettings['enable_orders_table']) && $payPlusSettings['enable_orders_table'] === 'yes';
 
-                if (isset($payPlusSettings['enable_dev_mode']) && $payPlusSettings['enable_dev_mode'] === "yes") { ?>
-                    <p>
-                        <strong>Advanced: </strong>
-                        <br>
-                        To run with special options … add to the url :
-                        <br>
-                        Usage of query parameters:
-                        <br>
-                        month - number 1 to 12
-                        <br>
-                        year - number
-                        <br>
-                        forceInvoice - boolean - true or false - will run ipn even if the response from payplus in the order exists and
-                        has a status of success. Will not run if an invoice was already created.
-                        <br>
-                        forceAll - boolean - true or false - will run ipn even if the response from payplus in the order exists and
+                if ($enableDevMode && $enableOrdersTable) {
+                    $orders_count_by_month = array();
+                    $current_year = gmdate('Y');
+                    $selected_year = isset($_POST['year']) ? intval($_POST['year']) : $current_year;
+                    $selected_month = isset($_POST['month']) ? intval($_POST['month']) : gmdate('m');
+                ?>
+                    <h2>Orders by Month - Table select</h2>
+                    <form method="post" action="" id="selctedYearForm">
+                        <label for="year">Choose Year:</label>
+                        <select name="year" id="year">
+                            <?php for ($i = $current_year; $i >= $current_year - 5; $i--) : ?>
+                                <option value="<?php echo esc_attr($i); ?>" <?php selected($selected_year, $i); ?>>
+                                    <?php echo esc_html($i); ?></option>
+                            <?php endfor; ?>
+                        </select>
+                        <label for="month">Choose Month:</label>
+                        <select name="month" id="month">
+                            <?php for ($i = 1; $i <= 12; $i++) : ?>
+                                <option value="<?php echo esc_attr($i); ?>" <?php selected($selected_month, $i); ?>>
+                                    <?php echo esc_html(gmdate('F', mktime(0, 0, 0, $i, 10))); ?></option>
+                            <?php endfor; ?>
+                        </select>
+                        <button type="submit">Submit</button>
+                    </form>
+                    <?php
+                    $current_year = $selected_year;
+                    $month = isset($_POST['month']) ? intval($_POST['month']) : $selected_month;
+                    $start_date = gmdate('Y-m-01 00:00:00', strtotime("$current_year-$month-01"));
+                    $end_date = gmdate('Y-m-t 23:59:59', strtotime("$current_year-$month-01"));
+                    $args = array(
+                        'date_created' => $start_date . '...' . $end_date,
+                        'return'       => 'ids',
+                        'limit'        => -1,
+                    );
+                    $orders = wc_get_orders($args);
+                    $orders_count_by_month[$month] = array();
 
-                        forceAll must be joined with month.
-                        <br>
-                    <h2>WARNING: The usage of forceAll is not recommended! - If forceAll is used then even orders that were
-                        manually
-                        changed to a certain status will be synced to the IPN data.</h2>
+                    foreach ($orders as $order_id) {
+                        $order = wc_get_order($order_id);
+                        $status = $order->get_status();
+                        if (!isset($orders_count_by_month[$month][$status])) {
+                            $orders_count_by_month[$month][$status] = array();
+                        }
+                        $orders_count_by_month[$month][$status][] = $order_id;
+                    }
 
-                    For example:
-                    <br>
+                    echo '<pre>';
+                    echo '<style>
+                    table#pp_all_orders {
+                        width: 90%;
+                        border-collapse: collapse;
+                    }
+                    th, td {
+                        border: 1px solid #ddd;
+                        padding: 8px;
+                        text-align: left;
+                    }
+                    th {
+                        background-color: #f2f2f2;
+                    }
+                    ul.pp_orders {
+                        list-style-type: none;
+                        padding: 0;
+                        margin: 0;
+                        display: flex;
+                        flex-wrap: wrap;
+                    }
+                    li {
+                        margin-right: 10px;
+                    }
+                </style>';
+                    echo '<table id="pp_all_orders">';
+                    echo '<tr><th>Month</th><th>Pending</th><th>Cancelled</th><th>Failed</th><th>Completed</th><th>Processing</th><th>On-Hold</th></tr>';
+                    foreach ($orders_count_by_month as $month => $statuses) {
+                        echo '<tr>';
+                        echo '<td>' . esc_html(gmdate('F', mktime(0, 0, 0, $month, 10))) . '</td>';
+                        foreach (['pending', 'cancelled', 'failed', 'completed', 'processing', 'on-hold'] as $status) {
+                            echo '<td>';
+                            if (isset($statuses[$status])) {
+                                echo '<ul class="pp_orders">';
+                                echo '<li><input type="checkbox" class="select-all" data-status="' . esc_attr($status) . '"> Select All</li>';
+                                foreach ($statuses[$status] as $order_id) {
+                                    echo '<li><input type="checkbox" name="order_ids[]" value="' . esc_attr($order_id) . '" class="order-checkbox-' . esc_attr($status) . '"> ' . esc_html($order_id) . '</li>';
+                                }
+                                echo '</ul>';
+                            } else {
+                                echo '0';
+                            }
+                            echo '</td>';
+                        }
+                        echo '</tr>';
+                    }
+                    echo '</table>';
+                    echo '</pre>';
+                    echo '<div id="selected-orders-summary"></div>';
+                    echo '<script>
+                    document.querySelectorAll(".select-all").forEach(function(selectAllCheckbox) {
+                        selectAllCheckbox.addEventListener("change", function() {
+                            var status = this.getAttribute("data-status");
+                            var checkboxes = this.closest("td").querySelectorAll(".order-checkbox-" + status);
+                            checkboxes.forEach(function(checkbox) {
+                                checkbox.checked = selectAllCheckbox.checked;
+                            });
+                            updateSelectedOrdersSummary();
+                        });
+                    });
 
-                    <strong>https://wordpresspp.test/wp-admin/admin.php?page=runPayPlusOrdersChecker&month=10&year=2024&forceInvoice=true</strong>
-                    </p>
-                    <h2>RECOMMENDED: JUST click the button below to run the default: Check ALL orders from today.</h2>
-                <?php
-                } ?>
-                <form method="post" action="">
-                    <button name="verifyPayPlusOrders" value="<?php echo esc_attr($nonce); ?>">Run PayPlus orders verifier</button>
-                </form>
+                    document.querySelectorAll("input[name=\'order_ids[]\']").forEach(function(orderCheckbox) {
+                        orderCheckbox.addEventListener("change", updateSelectedOrdersSummary);
+                    });
+
+                    function updateSelectedOrdersSummary() {
+                        var summary = {};
+                        var selectedOrderIds = [];
+                        document.querySelectorAll("input[name=\'order_ids[]\']:checked").forEach(function(checkbox) {
+                            if (selectedOrderIds.length < 100) {
+                                var month = checkbox.closest("tr").querySelector("td:first-child").textContent;
+                                var status = checkbox.closest("ul").querySelector(".select-all").getAttribute("data-status");
+                                if (!summary[month]) {
+                                    summary[month] = {};
+                                }
+                                if (!summary[month][status]) {
+                                    summary[month][status] = [];
+                                }
+                                summary[month][status].push(checkbox.value);
+                                selectedOrderIds.push(checkbox.value);
+                            } else {
+                                checkbox.checked = false;
+                            }
+                        });
+
+                        var summaryDiv = document.getElementById("selected-orders-summary");
+                        summaryDiv.innerHTML = "<h3>Selected Orders Summary</h3>";
+                        for (var month in summary) {
+                            summaryDiv.innerHTML += "<p><strong>" + month + ":</strong></p>";
+                            for (var status in summary[month]) {
+                                summaryDiv.innerHTML += "<p>" + status + ": " + summary[month][status].join(", ") + "</p>";
+                            }
+                        }
+                        if (selectedOrderIds.length >= 100) {
+                            summaryDiv.innerHTML += "<p><strong style=\'color: red;\'>Total Selected Orders: " + selectedOrderIds.length + "/100</strong></p>";
+                        } else {
+                            summaryDiv.innerHTML += "<p><strong>Total Selected Orders: " + selectedOrderIds.length + "/100</strong></p>";
+                        }
+
+                        // Update the order_numbers textarea
+                        var orderNumbersTextarea = document.querySelector("textarea[name=\'order_numbers\']");
+                        orderNumbersTextarea.value = selectedOrderIds.join(", ");
+
+                        // Hide orderFilters and timeFilters if any orders are selected
+                        var orderFilters = document.getElementById("orderFilters");
+                        var timeFilters = document.getElementById("timeFilters");
+                        var orderNumbers = document.getElementById("orderNumbers");
+                        if (selectedOrderIds.length > 0) {
+                            orderFilters.style.display = "none";
+                            timeFilters.style.display = "none";
+                            orderNumbers.style.display = "none";
+                        } else {
+                            orderFilters.style.display = "flex";
+                            timeFilters.style.display = "flex";
+                            orderNumbers.style.display = "flex";
+                        }
+                    }
+                </script>';
+                }
+                if ($enableDevMode) {
+                    ?>
+                    <form id="reportsForm" method="post" action=""
+                        style="display: flex;width: 20%;flex-direction: column;flex-wrap: wrap;">
+                        <span id="timeFilters" style="display: flex;flex-direction: column;">
+                            <h2>Orders by Month - Filter select</h2>
+                            <select name="month">
+                                <?php for ($i = 1; $i <= 12; $i++) : ?>
+                                    <option value="<?php echo esc_attr($i); ?>">
+                                        <?php echo esc_html(gmdate('F', mktime(0, 0, 0, $i, 10))); ?>
+                                    </option>
+                                <?php endfor; ?>
+                            </select>
+                            <label for="year">Year</label>
+                            <select name="year">
+                                <?php
+                                $currentYear = gmdate('Y');
+                                for ($i = $currentYear; $i >= $currentYear - 5; $i--) : ?>
+                                    <option value="<?php echo esc_attr($i); ?>"><?php echo esc_html($i); ?></option>
+                                <?php endfor; ?>
+                            </select>
+                            <label for="take">How many?</label>
+                            <select name="take" id="take">
+                                <option value="10">10</option>
+                                <option value="20">20</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                            </select>
+                            <label for="offset">Start from (Offset of 0 to 100)</label>
+                            <input type="number" name="offset" value="0" min="0" />
+                        </span>
+                        <div class="checkBoxes" style="display: flex;flex-direction: column;padding: 10px;">
+                            <span id="orderFilters" style="display: flex;flex-direction: column;">
+                                <h4>Filters:</h4>
+                                <span style="margin-right: 10px;">
+                                    <input type="radio" name="orderStatus" value="pendingOnly">
+                                    <label for="pendingOnly">Pending Only</label>
+                                </span>
+                                <span style="margin-right: 10px;">
+                                    <input type="radio" name="orderStatus" value="cancelledOnly">
+                                    <label for="cancelledOnly">Cancelled Only</label>
+                                </span>
+                                <span style="margin-right: 10px;">
+                                    <input type="radio" name="orderStatus" value="failedOnly">
+                                    <label for="failedOnly">Failed Only</label>
+                                </span>
+                                <span style="margin-right: 10px;">
+                                    <input type="radio" name="orderStatus" value="allStatuses">
+                                    <label for="orderStatus">All statuses</label>
+                                </span>
+                            </span>
+                            <div id="orderNumbers" style="display: flex;flex-direction: column;">
+                                <h4>(Optional - Overrides the filters) Enter order ids comma sepearated: </h4>
+                                <textarea name="order_numbers" placeholder="Enter order numbers, separated by commas"></textarea>
+                            </div>
+                            <h4>Actions:</h4>
+                            <span style="margin-right: 10px;">
+                                <input type="checkbox" name="forceInvoice" value="true">
+                                <label for="forceInvoice">Force Invoice (run IPN even if an invoice exists)</label>
+                            </span>
+                            <span style="margin-right: 10px;">
+                                <input type="checkbox" name="getInvoice" value="true">
+                                <label for="getInvoice">Get Invoices (If exist)</label>
+                            </span>
+                            <span style="margin-right: 10px;">
+                                <input type="checkbox" name="forceAll" value="true">
+                                <label for="forceAll">Force IPN (run IPN even if response exists)</label>
+                            </span>
+                            <span style="margin-right: 10px;">
+                                <input type="checkbox" name="reportOnly" value="true" checked>
+                                <label for="reportOnly">Report Only (will not make any changes)</label>
+                            </span>
+                        </div><button name="verifyPayPlusOrders" value="<?php echo esc_attr($nonce); ?>">Run PayPlus orders
+                            verifier</button>
+                    </form> <?php } else { ?>
+                    <form method="post" action="">
+                        <button name="verifyPayPlusOrders" value="<?php echo esc_attr($nonce); ?>">Run PayPlus orders verifier</button>
+                    </form> <?php } ?>
             </div>
 <?php
             if (isset($_POST['verifyPayPlusOrders'])) { // phpcs:ignore WordPress.Security.NonceVerification.Missing
                 $nonce = sanitize_text_field(wp_unslash($_POST['verifyPayPlusOrders'])); // phpcs:ignore WordPress.Security.NonceVerification.Missing
                 echo '<pre>';
-                echo 'Running PayPlus Order checker...';
-                $payPlusGateway = new WC_PayPlus_Gateway;
-                $payPlusGateway->payPlusOrdersCheck($nonce);
+                echo "Running PayPlus Order checker...\n";
+                if (wp_verify_nonce($nonce, 'payPlusOrderChecker')) {
+                    // Process the form data here
+                    $month = isset($_POST['month']) ? intval($_POST['month']) : gmdate('m');
+                    $year = isset($_POST['year']) ? intval($_POST['year']) : gmdate('Y');
+                    $take = isset($_POST['take']) ? intval($_POST['take']) : 10;
+                    $offset = isset($_POST['offset']) ? intval(wp_unslash($_POST['offset'])) : 0;
+                    $orderStatus = isset($_POST['orderStatus']) ? sanitize_text_field(wp_unslash($_POST['orderStatus'])) : false;
+                    $getInvoice = isset($_POST['getInvoice']) ? filter_var(wp_unslash($_POST['getInvoice']), FILTER_VALIDATE_BOOLEAN) : false;
+                    $forceInvoice = isset($_POST['forceInvoice']) ? filter_var(wp_unslash($_POST['forceInvoice']), FILTER_VALIDATE_BOOLEAN) : false;
+                    $forceAll = isset($_POST['forceAll']) ? filter_var(wp_unslash($_POST['forceAll']), FILTER_VALIDATE_BOOLEAN) : false;
+                    $reportOnly = isset($_POST['reportOnly']) ? filter_var(wp_unslash($_POST['reportOnly']), FILTER_VALIDATE_BOOLEAN) : false;
+                    // $allStatuses = isset($_POST['allStatuses']) ? filter_var(wp_unslash($_POST['allStatuses']), FILTER_VALIDATE_BOOLEAN) : false;
+                    $failedOnly = $orderStatus === 'failedOnly';
+                    $allStatuses = $orderStatus === 'allStatuses';
+                    $cancelledOnly = $orderStatus === 'cancelledOnly';
+                    $pendingOnly = $orderStatus === 'pendingOnly';
+                    $status = !$allStatuses ? ['pending', 'cancelled', 'failed'] : ['pending', 'cancelled', 'failed', 'completed', 'processing', 'on-hold'];
+                    $status = $failedOnly ? 'failed' : $status;
+                    $status = $cancelledOnly ? 'cancelled' : $status;
+                    $status = $pendingOnly ? 'pending' : $status;
+
+                    $current_time = current_time('Y-m-d H:i:s');
+
+                    if (isset($_POST['month'])) {
+                        // Get start and end dates for the given month
+                        $start_date = gmdate('Y-m-01 00:00:00', strtotime("$year-$month-01"));
+                        $end_date = gmdate('Y-m-t 23:59:59', strtotime("$year-$month-01")); // Last day of the month
+
+                        $dateOrDates = $start_date . '...' . $end_date;
+                    } else {
+                        $dateOrDates = $current_time;
+                        echo esc_html("Date to check: " . substr($current_time, 0, 10) . "\n");
+                    }
+
+                    $args = array(
+                        'status'       => $status,
+                        'date_created' => $dateOrDates, // Correct range format for WooCommerce
+                        'return'       => 'ids', // Just return IDs to save memory
+                        'limit'        => -1, // Retrieve all orders
+                    );
+
+
+
+                    if (isset($_POST['order_numbers']) && !empty($_POST['order_numbers'])) {
+                        $order_numbers = explode(',', sanitize_text_field(wp_unslash($_POST['order_numbers'])));
+                        $orders = array_reverse($order_numbers);
+                        $howManyOrders = count($orders);
+                        echo esc_html("\nTotal orders found: $howManyOrders\n");
+                        echo esc_html("Orders found: \n" . wp_json_encode($orders) . "\n");
+                    } else {
+                        if (isset($start_date) && isset($end_date)) {
+                            echo esc_html("Start date: $start_date\n");
+                            echo esc_html("End date: $end_date\n");
+                        }
+                        $statuses = wp_json_encode($status);
+                        echo esc_html("Selected statuses: $statuses\n");
+                        $orders = array_reverse(wc_get_orders($args));
+                        $howManyOrders = count($orders);
+                        echo esc_html("\nTotal orders found: $howManyOrders\n");
+                        echo esc_html("Orders found: \n" . wp_json_encode($orders) . "\n");
+
+                        $take = isset($_POST['take']) ? intval($_POST['take']) : 0;
+                        $offset = isset($_POST['offset']) ? intval($_POST['offset']) : 0;
+
+                        if ($take > 0 && $offset >= 0) {
+                            $args['limit'] = $take;
+                            $args['offset'] = $offset;
+                            $orders = wc_get_orders($args);
+                        } else {
+                            $orders;
+                        }
+                        $selectedOrders = count($orders);
+                        echo esc_html("\nTotal orders selected: $selectedOrders\n\n");
+                        echo esc_html("Selected orders " . wp_json_encode(array_reverse($orders)) . "\n");
+                    }
+
+                    $sanitized_post = array_map('sanitize_text_field', wp_unslash($_POST));
+                    echo "\n" . wp_json_encode($sanitized_post);
+
+                    // Display a confirmation form before running the function
+                    if (isset($_POST['confirm']) && $_POST['confirm'] === 'yes') {
+                        echo '<script type="text/javascript">
+                            document.getElementById("reportsForm").style.display = "none";
+                            document.getElementById("pp_all_orders").style.display = "none";
+                            document.getElementById("selctedYearForm").style.display = "none";
+                        </script>';
+                        echo '<style>
+                        table#pp_all_orders, form#selctedYearForm {
+                            display: none;
+                        }
+                        </style>';
+                        $payPlusGateway = new WC_PayPlus_Gateway();
+                        $payPlusGateway->payPlusOrdersCheck($nonce, $forceInvoice, $forceAll, $allStatuses, $getInvoice, $reportOnly, $orders, $status, $howManyOrders);
+                        echo '<br></br><button onclick="window.history.go(-2)">Go Back</button>';
+                    } else {
+                        echo '<script type="text/javascript">
+                            document.getElementById("reportsForm").style.display = "none";
+                        </script>';
+                        echo '<style>
+                        table#pp_all_orders, form#selctedYearForm {
+                            display: none;
+                        }
+                        </style>';
+                        echo '<form method="post">';
+                        echo '<input type="hidden" name="verifyPayPlusOrders" value="' . esc_attr($nonce) . '">';
+                        echo '<input type="hidden" name="month" value="' . esc_attr($month) . '">';
+                        echo '<input type="hidden" name="year" value="' . esc_attr($year) . '">';
+                        echo '<input type="hidden" name="take" value="' . esc_attr($take) . '">';
+                        echo '<input type="hidden" name="offset" value="' . esc_attr($offset) . '">';
+                        echo '<input type="hidden" name="orderStatus" value="' . esc_attr($orderStatus) . '">';
+                        echo '<input type="hidden" name="getInvoice" value="' . esc_attr($getInvoice) . '">';
+                        echo '<input type="hidden" name="forceInvoice" value="' . esc_attr($forceInvoice) . '">';
+                        echo '<input type="hidden" name="forceAll" value="' . esc_attr($forceAll) . '">';
+                        echo '<input type="hidden" name="reportOnly" value="' . esc_attr($reportOnly) . '">';
+                        echo '<input type="hidden" name="allStatuses" value="' . esc_attr($allStatuses) . '">';
+                        echo '<input type="hidden" name="order_numbers" value="' . esc_attr(implode(',', array_reverse($orders))) . '">';
+                        echo '<p>Are you sure you want to run the PayPlus Orders Validator?</p>';
+                        echo '<button type="submit" name="confirm" value="yes">Yes</button>';
+                        echo '<button type="submit" name="confirm" value="no">No</button>';
+                        echo '</form><br>';
+                        echo '<button onclick="history.back()">Go Back</button>';
+                    }
+                }
             }
         } else {
             wp_die('You do not have permission to perform this action.');
@@ -404,6 +736,14 @@ class WC_PayPlus_Form_Fields
                 when the customer selects payment with Google Pay he will only see the Google Pay in the payment page and will not see the CC fields.', 'payplus-payment-gateway'),
                 'desc_tip' => true,
             ],
+            'enable_double_check_if_pruid_exists' => [
+                'title' => __('Double check ipn', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'default' => 'no',
+                'label' => 'Double check ipn (Default: Unchecked)',
+                'description' => __('Before opening a payment page and if a PayPlus payment request uid already exists for this order, perform an ipn check.', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+            ],
             'order_status_title' => [
                 'title' => __('Order Settings', 'payplus-payment-gateway'),
                 'type' => 'title',
@@ -546,12 +886,19 @@ Orders that were successful and cancelled manually will not be tested or updated
                 'desc_tip' => true,
             ],
             'payplus_orders_check_button' => [
-                'title' => __('Display PayPlus "Orders Check Button"', 'payplus-payment-gateway'),
-                'label' => __('Show PayPlus "Orders Check Button" on the side menu.', 'payplus-payment-gateway'),
+                'title' => __('Display PayPlus "Orders Validator Button"', 'payplus-payment-gateway'),
+                'label' => __('Show PayPlus "Orders Validator Button" on the side menu.', 'payplus-payment-gateway'),
                 'type' => 'checkbox',
                 'default' => 'no',
-                'description' => __('The "PayPlus Orders Check" button checks all orders created within the last day are in "pending" status or "cancelled" and contain "payplus_page_request_uid". It verifies the PayPlus IPN Process and sets the correct status if needded.', 'payplus-payment-gateway'),
+                'description' => __('The "PayPlus Orders Validator" button checks all orders created within the last day are in "pending" status or "cancelled" and contain "payplus_page_request_uid". It verifies the PayPlus IPN Process and sets the correct status if needded.', 'payplus-payment-gateway'),
                 'desc_tip' => true,
+            ],
+            'enable_orders_table' => [
+                'title'   => __('Enable display of orders table select in PayPlus Orders Validator', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+                'description' => __('Display orders table on top of the PayPlus Orders Validator to select orders by month, year and status via checkboxes.', 'payplus-payment-gateway'),
+                'type'    => 'checkbox',
+                'default' => 'no',
             ],
             'payplus_show_sub_gateways_side_menu' => [
                 'title' => __('Display PayPlus Subgateways on the side menu', 'payplus-payment-gateway'),
