@@ -268,7 +268,8 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         $allowReturn = false,
         $getInvoice = false,
         $moreInfo = false,
-        $returnStatusOnly = false
+        $returnStatusOnly = false,
+        $isCron = false
     ) {
         $this->isInitiated();
 
@@ -442,6 +443,8 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                 }
             } else {
                 $note = $responseBody['data']['status'] ?? $responseBody['results']['description'] . ' - If token payment - token doesn`t fit billing or no payment.';
+                $note = !$isCron ? $note : 'Cron job: ' . $responseBody['data']['status'] ?? $responseBody['results']['description'];
+                $note = "Cron job: " ? "$note - No transaction data." : $note;
                 $order->add_order_note('PayPlus IPN: ' . $note);
             }
             if ($allowReturn) {
@@ -2122,11 +2125,8 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                 $objectProducts = $this->payplus_get_products_by_order_id($order_id, true);
             }
 
-            $payPlusResponse = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response', true);
-            $responseTotalAmount = !empty($payPlusResponse) && is_array(json_decode($payPlusResponse, true)) ? json_decode($payPlusResponse, true)['amount'] : false;
-            $totalCartAmount = $responseTotalAmount ? $responseTotalAmount : $objectProducts->amount;
+            $totalCartAmount = number_format($objectProducts->amount, 2, '.', '');
             $payplusRefunded = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_refunded', true);
-            $totalCartAmount = number_format($totalCartAmount, 2, '.', '');
 
             if (!$payplusRefunded) {
                 WC_PayPlus_Meta_Data::update_meta($order, array('payplus_refunded' => $order->get_total()));
@@ -2313,19 +2313,21 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         $order = wc_get_order($post_id);
         $total = $order->get_total();
 
-        $class = ($this->check_amount_authorization) ? 'payplus-visibility' : '';
-        echo "<li class='wide delayed-payment'>
+        if ($order->get_status() !== "processing" || $order->get_status() === "wc-processing") {
+            $class = ($this->check_amount_authorization) ? 'payplus-visibility' : '';
+            echo "<li class='wide delayed-payment'>
                     <h3>" . esc_html__('Charge Order Using PayPlus', 'payplus-payment-gateway') . "</h3>
                         <input class='" . esc_attr($class) . "'  data-amount='" . esc_attr($total) . "'  type='number' id='payplus_charge_amount' name='payplus_charge_amount' value='" . esc_attr($total) . "' min='0' max='" . esc_attr($total) . "' step='0.01' required />
                         <input type='hidden' id='payplus_order_id' name='payplus_order_id' value='" . esc_attr($post_id) . "'>
                         <button id='payplus-token-payment' type='button' name='payplus-token-payment' class='button button-primary'><span class='dashicons dashicons-cart'></span> " . esc_html__('Make Payment', 'payplus-payment-gateway') . "</button>
-                <div class='payplus_error'></div>
-                     <div class='payplus_loader'>
-      <div class='loader'>
-        <div class='loader-background'><div class='text'></div></div>
-      </div>
-    </div>
+                    <div class='payplus_error'></div>
+                    <div class='payplus_loader'>
+                        <div class='loader'>
+                            <div class='loader-background'><div class='text'></div></div>
+                        </div>
+                    </div>
                 </li>";
+        }
     }
 
     /**
