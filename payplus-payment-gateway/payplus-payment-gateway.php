@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.5.8
+ * Version: 7.5.9
  * Tested up to: 6.7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,7 +19,7 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.5.8');
+define('PAYPLUS_VERSION', '7.5.9');
 define('PAYPLUS_VERSION_DB', 'payplus_5_7');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
@@ -175,7 +175,7 @@ class WC_PayPlus
     {
         $schedules['half_hour'] = array(
             'interval' => 1800, // 30 minutes in seconds
-            'display'  => __('Every 30 Minutes'),
+            'display'  => __('Every 30 Minutes', 'payplus-payment-gateway'),
         );
         return $schedules;
     }
@@ -787,6 +787,7 @@ class WC_PayPlus
                                     'ajax_url' => admin_url('admin-ajax.php'),
                                     'frontNonce' => wp_create_nonce('frontNonce'),
                                     'isShippingWooJs' => $this->shipping_woo_js,
+                                    'requirePhoneText' => __('Phone number is required.', 'payplus-payment-gateway'),
                                 ]
                             );
                             wp_enqueue_script('payplus-front-js');
