@@ -123,8 +123,8 @@ class WC_PayPlus_Form_Fields
         if ($showOrdersButton) {
             add_submenu_page(
                 'payplus-payment-gateway', //Page Title
-                __('Run PayPlus orders validator', 'payplus-payment-gateway'),
-                __('Run PayPlus orders validator', 'payplus-payment-gateway'),
+                __('Run PayPlus Orders Reports/Validator', 'payplus-payment-gateway'),
+                __('Run PayPlus Orders Reports/Validator', 'payplus-payment-gateway'),
                 'administrator', //Capability
                 'runPayPlusOrdersChecker', //Page slug
                 [__CLASS__, 'runPayPlusOrdersChecker']
@@ -372,15 +372,15 @@ class WC_PayPlus_Form_Fields
                             <h4>Actions:</h4>
                             <span style="margin-right: 10px;">
                                 <input type="checkbox" name="forceInvoice" value="true">
-                                <label for="forceInvoice">Force Invoice (run IPN even if an invoice exists)</label>
+                                <label for="forceInvoice">Create Invoice<br>(Create default doc - Ignore order status)</label>
                             </span>
                             <span style="margin-right: 10px;">
                                 <input type="checkbox" name="getInvoice" value="true">
-                                <label for="getInvoice">Get Invoices (If exist)</label>
+                                <label for="getInvoice">Get Invoices (Instead of IPN!)</label>
                             </span>
                             <span style="margin-right: 10px;">
                                 <input type="checkbox" name="forceAll" value="true">
-                                <label for="forceAll">Force IPN (run IPN even if response exists)</label>
+                                <label for="forceAll">Force IPN (Run IPN even if response exists)</label>
                             </span>
                             <span style="margin-right: 10px;">
                                 <input type="checkbox" name="reportOnly" value="true" checked>

@@ -448,7 +448,7 @@ class PayplusInvoice
                 $responeType = "_refund" . $documentType;
                 $WC_PayPlus_Gateway->payplus_add_log_all($handle, wp_json_encode($res), 'completed');
                 $refundsJson = WC_PayPlus_Meta_Data::get_meta($order, "payplus_refunds");
-                $refundsArray = !empty($refundsJson) > 0 ? json_decode($refundsJson, true) : $refundsJson;
+                $refundsArray = !empty($refundsJson) ? json_decode($refundsJson, true) : [];
                 $refundsArray[$res->details->number]['link'] = $res->details->originalDocAddress;
                 $refundsArray[$res->details->number]['type'] = $nameDocment;
                 $insetData["payplus_refunds"] = wp_json_encode($refundsArray);
@@ -648,16 +648,10 @@ class PayplusInvoice
                 isset($item['discount_value']) ? ($payPlusPayloadInvoice['items'][$key]['discount_value'] = $isRefund ? -$item['discount_value'] : $item['discount_value']) : null;
                 $sku_or_id = $item['barcode']; // Can be a SKU or ID
                 $product_id = wc_get_product($sku_or_id);
-                if ($product_id) {
-                } else {
+                if (!$product_id) {
                     $product_id = wc_get_product_id_by_sku($sku_or_id);
                 }
-                $product = wc_get_product($product_id);
-                if ($product) {
-                    $payPlusPayloadInvoice['items'][$key]['name'] = $product->get_name();
-                } else {
-                    $sku_or_id === "order-shipping" ? $payPlusPayloadInvoice['items'][$key]['name'] = __('Shipping', 'payplus-payment-gateway') : $payPlusPayloadInvoice['items'][$key]['name'] = $item['name'];
-                }
+                $sku_or_id === "order-shipping" ? $payPlusPayloadInvoice['items'][$key]['name'] = __('Shipping', 'payplus-payment-gateway') : $payPlusPayloadInvoice['items'][$key]['name'] = $item['name'];
             }
 
             foreach ($payPlusPayloadInvoice['payments'] as $key => $payment) {
@@ -1034,6 +1028,8 @@ class PayplusInvoice
     public function payplus_invoice_create_order($order_id, $typeInvoice = false, $isCashPayment = false)
     {
         if (!wp_verify_nonce($this->_wpnonce, 'PayPlusGateWayInvoiceNonce')) {
+            $WC_PayPlus_Gateway = $this->get_main_payplus_gateway();
+            $WC_PayPlus_Gateway->payplus_add_log_all('payplus_process_invoice_failed', "Failed to run because of nonce : payplus_process_invoice for order:  $order_id\n");
             wp_die('Not allowed! - payplus_invoice_create_order');
         }
 

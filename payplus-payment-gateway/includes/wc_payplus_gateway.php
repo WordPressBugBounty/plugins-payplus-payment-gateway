@@ -87,6 +87,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     public $global_shipping_tax;
     public $global_shipping_tax_rate;
     public $token_apple_pay;
+    public $google_apple_pay_page_uid;
     public $enable_google_pay;
     public $enable_apple_pay;
     public $enable_product;
@@ -239,6 +240,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->global_shipping_tax = $this->get_option('global_shipping_tax');
         $this->global_shipping_tax_rate = $this->get_option('global_shipping_tax_rate');
         $this->token_apple_pay = $this->get_option('apple_pay_identifier');
+        $this->google_apple_pay_page_uid = $this->get_option('google_apple_pay_page_uid');
         $this->enable_google_pay = $this->get_option('enable_google_pay') == 'yes' ? true : false;
         $this->enable_apple_pay = $this->get_option('enable_apple_pay') == 'yes' ? true : false;
         $this->enable_product = $this->get_option('enable_product') == 'yes' ? true : false;
@@ -423,6 +425,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
         echo "<pre>";
         !$getInvoice ? $ipnMessage = "RUNNING IPN!" : $ipnMessage = "RUNNING Invoice+ call! - Check order notes and status for results!";
+        $reportOnly && !$getInvoice ? $ipnMessage = "RUNNING IPN! - Report only mode!" : null;
         $outPut = [];
         if (count($orders)) {
             echo "\nThe following orders will be processed: <br>";
@@ -446,7 +449,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     if ($hasInvoice) {
                         $outPut[$order_id]['has_invoice'] = $hasInvoice;
                     }
-                    if (WC_PayPlus_Statics::pp_is_json($payPlusResponse) && !$forceAll) {
+                    if (WC_PayPlus_Statics::pp_is_json($payPlusResponse)) {
                         $responseStatus = json_decode($payPlusResponse, true)['status_code'];
                         if ($responseStatus === "000") {
                             $outPut[$order_id]['response_status'] = $responseStatus;
@@ -468,14 +471,22 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                                 $runIpn = true;
                             }
                         }
-                    } elseif (!$forceAll) {
                         $forceInvoice ? $runIpn = true : null;
-                        if ($hasInvoice) {
+                        if (!$forceInvoice && $hasInvoice) {
                             $runIpn = false;
                             echo esc_html("Order #$order_id contains payment page uid! HAS AN INVOICE! - SKIPPING IPN!\n");
                             $outPut[$order_id]['message_invoice'] = "Order #$order_id contains payment page uid! HAS AN INVOICE! - SKIPPING IPN!";
+                        } else {
+                            if (!$reportOnly) {
+                                echo esc_html("Order #$order_id with forceinvoice ! - RUNNING invoice+ process!\n");
+                                $this->invoice_api->payplus_invoice_create_order($order_id);
+                            } else {
+                                echo esc_html("Order #$order_id with forceinvoice & report only! - NOT RUNNING invoice+ process!\n");
+                            }
                         }
                     }
+
+                    $runIpn = $forceAll ? true : $runIpn;
                     if ($runIpn) {
                         echo esc_html("Order #$order_id - $ipnMessage\n");
                         $order_customer = $order->get_billing_first_name() . ' ' . $order->get_billing_last_name();
@@ -500,7 +511,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                                     echo esc_html("Order #$order_id doesn't seem to have invoice+ docs...\n\n");
                                     $outPut[$order_id]['message_invoices'] = "Order #$order_id doesn't seem to have invoice+ docs...";
                                 } else {
-                                    echo esc_html("Order #$order_id status changed to: $ipnResponse\n\n");
+                                    echo esc_html("Order ipn data was updated, #$order_id status is: $ipnResponse\n\n");
                                     $outPut[$order_id]['status_change'] = $ipnResponse;
                                 }
                             }
@@ -882,7 +893,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
                     if ($this->invoice_api->payplus_get_invoice_enable() && !$invoice_manual) {
                         $resultApps = $this->invoice_api->payplus_get_payments($order_id, 'otherClub');
-                        if ($resultApps[$indexRow]->price > round($amount, $this->rounding_decimals)) {
+                        if (isset($resultApps[$indexRow]->price) && $resultApps[$indexRow]->price > round($amount, $this->rounding_decimals)) {
                             $resultApps[$indexRow]->price = $amount * 100;
                         }
                         $this->invoice_api->payPlusCreateRefundInvoicePlus(
@@ -2090,15 +2101,43 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             // YourMoment Split Shipping
             if ($shipping_splitted) {
                 $orderTotal = $order->get_total();
-                if ($totalCartAmount < $orderTotal) {
-                    $productPrice = number_format($orderTotal - $totalCartAmount, 2, '.', '');
+                // Only for admin
+                // if(current_user_can('administrator')) {
+                if ($order->get_total_discount()) {
+                    /* 
+                    This condition runs when the shipping is splitted and the order has the discount applied.
+                    -- What we did was to get the total shipping cost from the order total.
+                        - We performed a calculation to get the total shipping cost from the order total
+                        - Then we pushed the shipping price to the items array. 
+                        - Once we got the total shipping cost, we added just the shipping cost to the total cart amount. 
+                          The discount will be calculated by the payplus plugin itself.
+                    */
+                    $productCouponPrice = ($order->get_total_discount());
+                    if ($this->rounding_decimals != 0 && $wc_tax_enabled) {
+                        $productCouponPrice += $order->get_discount_tax();
+                    }
+                    $productCouponPrice = round($productCouponPrice, $this->rounding_decimals);
+                    $shippingTC = number_format(($orderTotal + $productCouponPrice) - $totalCartAmount, 2, '.', '');
+
                     $itemDetails = [
                         'name' => __('Shipping', 'payplus-payment-gateway'),
                         'quantity' => 1,
-                        'price' => $productPrice,
+                        'price' => round($shippingTC, $this->rounding_decimals),
                     ];
                     $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
-                    $totalCartAmount += $productPrice;
+                    $totalCartAmount += $shippingTC;
+                }
+                if ($totalCartAmount < $orderTotal) {
+                    if (!$order->get_total_discount()) {
+                        $productPrice = number_format($orderTotal - $totalCartAmount, 2, '.', '');
+                        $itemDetails = [
+                            'name' => __('Shipping', 'payplus-payment-gateway'),
+                            'quantity' => 1,
+                            'price' => $productPrice,
+                        ];
+                        $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+                        $totalCartAmount += $productPrice;
+                    }
                 }
             }
             // YourMoment Split Shipping
@@ -2548,7 +2587,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $LocalTime = $datetime->format('Y-m-d H:i:s');
         if ($order) {
             $orderStatus = $order->get_status();
-            $orderStatusNote = $orderStatus === 'processing' ? 'Order is on processing status! - callback will end.' : $orderStatus;
+            $orderStatusNote = $orderStatus === 'processing' ? 'Order is on processing status!' : $orderStatus;
             $this->payplus_add_log_all(
                 'payplus_callback_secured',
                 "Order # $order_id
@@ -2578,7 +2617,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
             $this->payplus_add_log_all(
                 'payplus_callback_secured',
-                "$order_id -Callback continues: doing database query now, status_code: $status_code"
+                "$order_id - Doing database query now, status_code: $status_code"
             );
 
             $result = $wpdb->get_results($wpdb->prepare(
@@ -2633,7 +2672,6 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     $payload['related_transaction'] = true;
                     $payload = wp_json_encode($payload);
                     $this->payplus_add_log_all($handle, wp_json_encode($payload), 'payload');
-
                     $this->requestPayPlusIpn($payload, $inData, 1, $handle);
                 }
             } else {
@@ -2832,17 +2870,17 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             if ($type == "Charge") {
                 if ($this->fire_completed) {
                     $order->payment_complete();
-                    $this->payplus_add_log_all('payplus_request_ipn', "payplus_update_order_status_request_ipn->Update status to->firePaymentComplete\n");
+                    // $this->payplus_add_log_all('payplus_request_ipn', "payplus_update_order_status_request_ipn->Update status to->firePaymentComplete\n");
                 }
                 $order = wc_get_order($order_id);
                 if ($this->successful_order_status !== 'default-woo' && $order->get_status() != $this->successful_order_status) {
                     $order->update_status($this->successful_order_status);
-                    $this->payplus_add_log_all('payplus_request_ipn', "payplus_update_order_status_request_ipn->Update status to->$this->successful_order_status\n");
+                    // $this->payplus_add_log_all('payplus_request_ipn', "payplus_update_order_status_request_ipn->Update status to->$this->successful_order_status\n");
                     $order->save();
                 }
             } else {
                 $order->update_status('wc-on-hold');
-                $this->payplus_add_log_all('payplus_request_ipn', "payplus_update_order_status_request_ipn->Update status to->wc-on-hold\n");
+                // $this->payplus_add_log_all('payplus_request_ipn', "payplus_update_order_status_request_ipn->Update status to->wc-on-hold\n");
                 $order->save();
             }
 
@@ -2908,9 +2946,6 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $type = isset($data['type']) ? $data['type'] : '';
         $userID = 0;
         $order = wc_get_order($order_id);
-
-        // Get customer ID
-        $customerId = $order->get_user_id();
 
         WC_PayPlus_Meta_Data::update_meta($order, array('payplus_function_end' => $handleLog));
         $this->updateOrderPayplus($order_id, $handleLog);

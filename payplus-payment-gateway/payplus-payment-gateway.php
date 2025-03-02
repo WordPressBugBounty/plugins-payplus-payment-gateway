@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.6.0
+ * Version: 7.6.1
  * Tested up to: 6.7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.6.0');
-define('PAYPLUS_VERSION_DB', 'payplus_5_7');
+define('PAYPLUS_VERSION', '7.6.1');
+define('PAYPLUS_VERSION_DB', 'payplus_5_8');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -39,7 +39,7 @@ class WC_PayPlus
     private $isHostedInitiated = false;
     public $secret_key;
     public $shipping_woo_js;
-    public $cartHashCheck;
+    public $disableCartHashCheck;
 
     /**
      * The main PayPlus gateway instance. Use get_main_payplus_gateway() to access it.
@@ -55,7 +55,7 @@ class WC_PayPlus
     {
         //ACTION
         $this->payplus_payment_gateway_settings = (object) get_option('woocommerce_payplus-payment-gateway_settings');
-        $this->cartHashCheck = boolval(property_exists($this->payplus_payment_gateway_settings, 'disable_cart_hash_check') && $this->payplus_payment_gateway_settings->disable_cart_hash_check === 'yes');
+        $this->disableCartHashCheck = boolval(property_exists($this->payplus_payment_gateway_settings, 'disable_cart_hash_check') && $this->payplus_payment_gateway_settings->disable_cart_hash_check === 'yes');
         $this->shipping_woo_js = property_exists($this->payplus_payment_gateway_settings, 'shipping_woo_js') && $this->payplus_payment_gateway_settings->shipping_woo_js === "yes" ? true : false;
         $this->hostedFieldsOptions = get_option('woocommerce_payplus-payment-gateway-hostedfields_settings');
         $this->applePaySettings = get_option('woocommerce_payplus-payment-gateway-applepay_settings');
@@ -302,12 +302,29 @@ class WC_PayPlus
      */
     public function ipn_response()
     {
+        $nonce = isset($_REQUEST['_wpnonce']) ? sanitize_text_field(wp_unslash($_REQUEST['_wpnonce'])) : '';
+        if (!wp_verify_nonce($nonce, 'payload_link')) {
+            $order_id = isset($_REQUEST['more_info']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info'])) : false;
+            if ($order_id) {
+                //failed nonce check, will be redirected to regular thank you page with ipn
+                $order = wc_get_order($order_id);
+                $payPlusResponse = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response');
+                if (empty($payPlusResponse)) {
+                    $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
+                    $_wpnonce = wp_create_nonce('_wp_payplusIpn');
+                    $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce);
+                }
+                $redirect_to = add_query_arg('order-received', $order_id, get_permalink(wc_get_page_id('checkout')));
+                wp_redirect($redirect_to);
+                exit;
+            } else {
+                // no order id
+                wp_die('Invalid request');
+            }
+        }
+
         $this->payplus_gateway = $this->get_main_payplus_gateway();
         $REQUEST = $this->payplus_gateway->arr_clean($_REQUEST);
-
-        if (!wp_verify_nonce(sanitize_key($REQUEST['_wpnonce']), 'payload_link')) {
-            check_ajax_referer('payload_link', '_wpnonce');
-        }
 
         if (isset($_GET['hostedFields']) && $_GET['hostedFields'] === "true") {
             $REQUEST = json_decode(stripslashes($REQUEST['jsonData']), true)['data'];
@@ -316,21 +333,20 @@ class WC_PayPlus
         $order_id = isset($REQUEST['more_info']) ? sanitize_text_field(wp_unslash($REQUEST['more_info'])) : '';
         $order = wc_get_order($order_id);
 
-        if (!$this->cartHashCheck) {
+        // runs cart check if all nonce checks passed and cart hash check is not disabled.
+        if (!$this->disableCartHashCheck) {
             $stored_cart_hash = WC_PayPlus_Meta_Data::get_meta($order_id, 'cart_hash', true);
             $stored_salt = WC_PayPlus_Meta_Data::get_meta($order_id, 'more_info_3', true);
-            $received_cart_hash = isset($REQUEST['more_info_2']) ? sanitize_text_field(wp_unslash($REQUEST['more_info_2'])) : '';
-            $received_salt = isset($REQUEST['more_info_3']) ? sanitize_text_field(wp_unslash($REQUEST['more_info_3'])) : '';
+            $received_cart_hash = isset($_REQUEST['more_info_2']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info_2'])) : '';
+            $received_salt = isset($_REQUEST['more_info_3']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info_3'])) : '';
             $calculated_hash = hash('sha256', WC()->cart->get_cart_hash() . $received_salt);
-
 
             if ($stored_cart_hash !== $received_cart_hash || $calculated_hash !== $received_cart_hash) {
                 $redirect_to = add_query_arg('order-received', $order_id, get_permalink(wc_get_page_id('checkout')));
                 wp_redirect($redirect_to);
-                return;
+                exit;
             }
         }
-
 
         global $wpdb;
         $tblname = $wpdb->prefix . 'payplus_payment_process';
@@ -810,6 +826,7 @@ class WC_PayPlus
                                     'frontNonce' => wp_create_nonce('frontNonce'),
                                     'isShippingWooJs' => $this->shipping_woo_js,
                                     'requirePhoneText' => __('Phone number is required.', 'payplus-payment-gateway'),
+                                    'successPhoneText' => __('Click again to continue!', 'payplus-payment-gateway'),
                                 ]
                             );
                             wp_enqueue_script('payplus-front-js');

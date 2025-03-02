@@ -442,8 +442,9 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                     }
                 }
             } else {
-                $note = $responseBody['data']['status'] ?? $responseBody['results']['description'] . ' - If token payment - token doesn`t fit billing or no payment.';
-                $note = !$isCron ? $note : 'Cron job: ' . $responseBody['data']['status'] ?? $responseBody['results']['description'];
+                $result = $responseBody['data']['status'] ?? $responseBody['results']['description'];
+                $note = $result . ' - If token payment - token doesn`t fit billing or no payment.';
+                $note = !$isCron ? $note : 'Cron job: ' . $result;
                 $note = "Cron job: " ? "$note - No transaction data." : $note;
                 $order->add_order_note('PayPlus IPN: ' . $note);
             }
@@ -1805,6 +1806,8 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                     if ($this->isInvoiceEnable) {
                         echo '<button type="button" data-value="' . esc_attr($order_id) . '" value="' . esc_attr($transactionUid) . '" title="' . esc_attr(__('This button only syncs Invoice+ documents that exists to the WooCommerce order meta data - this will make the PayPlus metabox show these also.', 'payplus-payment-gateway')) . '" class="button" id="get-invoice-plus-data" style="position: absolute;' . esc_attr($rtl) . ': 10%; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Get Invoice+ Data</button>';
                     }
+                    // for future use
+                    // echo '<button type="button" data-value="' . esc_attr($order_id) . '" value="' . esc_attr($transactionUid) . '" title="' . esc_attr(__('This button only syncs Invoice+ documents that exists to the WooCommerce order meta data - this will make the PayPlus metabox show these also.', 'payplus-payment-gateway')) . '" class="button" id="create-invoice-plus-data" style="position: absolute;' . esc_attr($rtl) . ': 10%; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Create Invoice+ doc</button>';
                     echo "<div class='payplus_loader_gpp'>
                         <div class='loader'>
                           <div class='loader-background'><div class='text'></div></div>
@@ -2267,6 +2270,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                 "payplusGenerateLinkPayment" => wp_create_nonce('payplus_generate_link_payment'),
                 "payplusCustomAction" => wp_create_nonce('payplus_payplus_ipn'),
                 "frontNonce" => wp_create_nonce('frontNonce'),
+                "mainPageUid" => $this->api_test_mode === "yes" ? $this->allSettings['dev_payment_page_id'] : $this->allSettings['payment_page_id'],
                 "isApplePayEnabled" => $this->isApplePayEnabled,
                 "tokenPaymentConfirmMessage" => __('Are you sure you want to charge this order with token of CC that ends with: ', 'payplus-payment-gateway'),
             )
