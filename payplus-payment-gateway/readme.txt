@@ -4,7 +4,7 @@ Tags: Woocommerce Payment Gateway, Credit Cards, Charges and Refunds, Subscripti
 Requires at least: 3.0.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 7.6.1
+Stable tag: 7.6.2
 PlugIn URL: https://www.payplus.co.il/wordpress
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
@@ -86,7 +86,13 @@ If you get stuck, you can ask for help in the Plugin Forum. or contact us direct
 
 == Changelog ==
 
-= 7.6.1 - 01-03-2025 =
+= 7.6.2 - 03-03-2025 =
+
+- Tweak - Enhanced order IPN event to run 2 minutes after the payment page is triggered when using classic checkout.
+- Added - Compatibility with "YITH WooCommerce Gift Cards" (free version) in PayPlus Embedded.
+- Fix   - Resolved a JS visual bug on the "Orders page" where a variable was defined in the wrong place.
+
+= 7.6.1 - 02-03-2025 =
 
 - Tweak - Express Checkout Initialization now displays the payment page UID for the activated feature.
 - Tweak - PayPlus Orders Reports/Validator in "Partners mode" now includes a "Create invoice" option.

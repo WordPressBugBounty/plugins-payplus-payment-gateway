@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.6.1
+ * Version: 7.6.2
  * Tested up to: 6.7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.6.1');
-define('PAYPLUS_VERSION_DB', 'payplus_5_8');
+define('PAYPLUS_VERSION', '7.6.2');
+define('PAYPLUS_VERSION_DB', 'payplus_5_9');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -307,7 +307,6 @@ class WC_PayPlus
             $order_id = isset($_REQUEST['more_info']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info'])) : false;
             if ($order_id) {
                 //failed nonce check, will be redirected to regular thank you page with ipn
-                $order = wc_get_order($order_id);
                 $payPlusResponse = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response');
                 if (empty($payPlusResponse)) {
                     $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
