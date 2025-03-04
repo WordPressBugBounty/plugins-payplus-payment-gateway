@@ -1662,7 +1662,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $order = wc_get_order($order_id);
             $this->payplus_add_log_all('payplus_after_process_payment_event', 'Running for order #' . $order_id . ' Checking order status: ' . $order->get_status());
             $payPlusResponse = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response');
-            if (empty($payPlusResponse) && $order->get_status() === 'pending') {
+            if (empty($payPlusResponse) || $order->get_status() === 'pending') {
                 $this->payplus_add_log_all('payplus_after_process_payment_event', 'Order #' . $order_id . ' Running IPN!');
                 $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
                 $_wpnonce = wp_create_nonce('_wp_payplusIpn');
@@ -2218,7 +2218,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         }
 
         $customer = (count($customer)) ? '"customer":' . wp_json_encode($customer) . "," : "";
-        $redriectSuccess = ($isAdmin) ? $this->response_url . "&paymentPayPlusDashboard=" . $this->payplus_generate_key_dashboard . "&_wpnonce=" . wp_create_nonce('payload_link') : $this->response_url . "&success_order_id=$order_id&_wpnonce=" . wp_create_nonce('payload_link');
+        $returnUrl = add_query_arg('wc-api', 'payplus_gateway', $this->get_return_url($order));
+        $redirectSuccess = ($isAdmin) ? $returnUrl . "&paymentPayPlusDashboard=" . $this->payplus_generate_key_dashboard . "&_wpnonce=" . wp_create_nonce('payload_link') : $returnUrl . "&success_order_id=$order_id&_wpnonce=" . wp_create_nonce('payload_link');
         $setInvoice = '';
         $payingVat = '';
         $invoiceLanguage = '';
@@ -2321,7 +2322,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             "expiry_datetime": "30",
             "hide_other_charge_methods": ' . $hideOtherChargeMethods . ',
             "language_code": "' . trim(strtolower($langCode[0])) . '",
-            "refURL_success": "' . $redriectSuccess . '&charge_method=' . $this->default_charge_method . '",
+            "refURL_success": "' . $redirectSuccess . '&charge_method=' . $this->default_charge_method . '",
             "refURL_failure": "' . $this->response_error_url . '",
             "refURL_callback": "' . $callback . '",
             "charge_default":"' . $this->default_charge_method . '",
