@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.6.5
+ * Version: 7.6.6
  * Tested up to: 6.7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,7 +19,7 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.6.5');
+define('PAYPLUS_VERSION', '7.6.6');
 define('PAYPLUS_VERSION_DB', 'payplus_5_9');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
@@ -40,6 +40,7 @@ class WC_PayPlus
     public $secret_key;
     public $shipping_woo_js;
     public $disableCartHashCheck;
+    public $updateStatusesIpn;
 
     /**
      * The main PayPlus gateway instance. Use get_main_payplus_gateway() to access it.
@@ -56,6 +57,7 @@ class WC_PayPlus
         //ACTION
         $this->payplus_payment_gateway_settings = (object) get_option('woocommerce_payplus-payment-gateway_settings');
         $this->disableCartHashCheck = boolval(property_exists($this->payplus_payment_gateway_settings, 'disable_cart_hash_check') && $this->payplus_payment_gateway_settings->disable_cart_hash_check === 'yes');
+        $this->updateStatusesIpn = boolval(property_exists($this->payplus_payment_gateway_settings, 'update_statuses_in_ipn') && $this->payplus_payment_gateway_settings->update_statuses_in_ipn === 'yes');
         $this->shipping_woo_js = property_exists($this->payplus_payment_gateway_settings, 'shipping_woo_js') && $this->payplus_payment_gateway_settings->shipping_woo_js === "yes" ? true : false;
         $this->hostedFieldsOptions = get_option('woocommerce_payplus-payment-gateway-hostedfields_settings');
         $this->applePaySettings = get_option('woocommerce_payplus-payment-gateway-applepay_settings');
@@ -320,7 +322,7 @@ class WC_PayPlus
             if ($order_id) {
                 //failed nonce check, will be redirected to regular thank you page with ipn
                 $order = wc_get_order($order_id);
-                $this->checkRunIpnResponse($order_id, $order, 1);
+                $this->updateStatusesIpn ? $this->checkRunIpnResponse($order_id, $order, 1) : null;
                 $redirect_to = add_query_arg('order-received', $order_id, get_permalink(wc_get_page_id('checkout')));
                 wp_redirect($redirect_to);
                 exit;
@@ -344,7 +346,7 @@ class WC_PayPlus
         // $order_key = $order->get_order_key();
         // $isRightKey = strpos($current_url, 'key=' . $order_key) !== false;
 
-        $this->checkRunIpnResponse($order_id, $order, 2);
+        $this->updateStatusesIpn ? $this->checkRunIpnResponse($order_id, $order, 2) : null;
 
         // runs cart check if all nonce checks passed and cart hash check is not disabled.
         if (!$this->disableCartHashCheck) {
