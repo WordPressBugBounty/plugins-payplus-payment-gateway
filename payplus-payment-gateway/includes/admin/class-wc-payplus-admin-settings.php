@@ -419,7 +419,16 @@ class WC_PayPlus_Admin_Settings
                     'type' => 'multiselect',
                     'options' => [
                         'paypal' => esc_html__('PayPal', 'payplus-payment-gateway'),
+                        'bacs' => esc_html__('Direct bank transfer', 'payplus-payment-gateway'),
+                        'cod' => esc_html__('Cash on Delivery', 'payplus-payment-gateway'),
                     ]
+                );
+                $settings[$section][] = array(
+                    'name' => __('Show Invoice+ Get/Create buttons', 'payplus-payment-gateway'),
+                    'id' => 'payplus_invoice_option[show_invoice_plus_buttons]',
+                    'type' => 'checkbox',
+                    'default' => 'no',
+                    'class' => 'payplus-display'
                 );
                 $settings[$section][] = array(
                     'name' => __('Show Invoice+ metabox in order page', 'payplus-payment-gateway'),

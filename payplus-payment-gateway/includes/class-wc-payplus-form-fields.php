@@ -585,6 +585,13 @@ class WC_PayPlus_Form_Fields
                 'default' => '',
                 'desc_tip' => true,
             ],
+            'device_uid' => [
+                'title' => __('POS Device UID (If applicable)', 'payplus-payment-gateway'),
+                'type' => 'text',
+                'description' => __('Your POS Device UID can be found in your PayPlus account', 'payplus-payment-gateway'),
+                'default' => '',
+                'desc_tip' => true,
+            ],
             'dev_api_key' => [
                 'title' => __('Development API Key', 'payplus-payment-gateway'),
                 'type' => 'text',
@@ -592,7 +599,6 @@ class WC_PayPlus_Form_Fields
                 'default' => '',
                 'desc_tip' => true,
             ],
-
             'dev_secret_key' => [
                 'title' => __('Devlopment Secret Key', 'payplus-payment-gateway'),
                 'type' => 'text',
@@ -604,6 +610,13 @@ class WC_PayPlus_Form_Fields
                 'title' => __('Development Payment Page UID', 'payplus-payment-gateway'),
                 'type' => 'text',
                 'description' => __('Your Dev payment page UID can be found under Payment Pages in your side menu in PayPlus account', 'payplus-payment-gateway'),
+                'default' => '',
+                'desc_tip' => true,
+            ],
+            'dev_device_uid' => [
+                'title' => __('Development POS Device UID (If applicable)', 'payplus-payment-gateway'),
+                'type' => 'text',
+                'description' => __('Your Dev POS Device UID can be found in your PayPlus account', 'payplus-payment-gateway'),
                 'default' => '',
                 'desc_tip' => true,
             ],
@@ -863,7 +876,7 @@ class WC_PayPlus_Form_Fields
             'disable_cart_hash_check' => [
                 'title' => __('Disable cart hash check security feature', 'payplus-payment-gateway'),
                 'type' => 'checkbox',
-                'default' => 'no',
+                'default' => 'yes',
                 'description' => __('Disable cart hash check security feature.', 'payplus-payment-gateway'),
                 'label' => __('Disable cart hash check security feature', 'payplus-payment-gateway'),
                 'desc_tip' => true,

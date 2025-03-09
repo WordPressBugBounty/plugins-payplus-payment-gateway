@@ -34,6 +34,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     public $api_key;
     public $transaction_type;
     public $secret_key;
+    public $device_uid;
     public $payment_page_id;
     public $disable_woocommerce_scheduler;
     public $initial_invoice;
@@ -74,6 +75,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     public $add_payment_res_url;
     public $api_url;
     public $payment_url;
+    public $devicePaymentUrl;
     public $ipn_url;
     public $invoice_search;
     public $refund_url;
@@ -148,6 +150,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->block_ip_transactions_hour = $this->get_option('block_ip_transactions_hour');
         $this->api_key = $this->api_test_mode ? $this->get_option('dev_api_key') ?? null : $this->get_option('api_key');
         $this->secret_key = $this->api_test_mode ? $this->get_option('dev_secret_key') ?? null : $this->get_option('secret_key');
+        $this->device_uid = $this->api_test_mode ? $this->get_option('dev_device_uid') ?? null : $this->get_option('device_uid');
         $this->payment_page_id = $this->api_test_mode ? $this->get_option('dev_payment_page_id') ?? null : $this->get_option('payment_page_id');
         $this->current_time = wp_date('Y-m-d H:i:s', current_time('timestamp'), new DateTimeZone('Asia/Jerusalem'));
         $this->rounding_decimals = ROUNDING_DECIMALS;
@@ -223,6 +226,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
         $this->api_url = ($this->api_test_mode) ? PAYPLUS_PAYMENT_URL_DEV : PAYPLUS_PAYMENT_URL_PRODUCTION;
         $this->payment_url = $this->api_url . 'PaymentPages/generateLink';
+        $this->devicePaymentUrl = $this->api_url . 'Device/TransactionByDevice';
         $this->ipn_url = $this->api_url . 'PaymentPages/ipn';
         $this->invoice_search = $this->api_url . 'books/docs/list';
         $this->refund_url = $this->api_url . 'Transactions/RefundByTransactionUID';
@@ -428,7 +432,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
         echo "<pre>";
         !$getInvoice ? $ipnMessage = "RUNNING IPN!" : $ipnMessage = "RUNNING Invoice+ call! - Check order notes and status for results!";
-        $reportOnly && !$getInvoice ? $ipnMessage = "RUNNING IPN! - Report only mode!" : null;
+        $reportOnly && !$getInvoice ? $ipnMessage = "IPN - Report only mode!" : null;
         $outPut = [];
         if (count($orders)) {
             echo "\nThe following orders will be processed: <br>";
@@ -484,7 +488,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                                 echo esc_html("Order #$order_id with forceinvoice ! - RUNNING invoice+ process!\n");
                                 $this->invoice_api->payplus_invoice_create_order($order_id);
                             } else {
-                                echo esc_html("Order #$order_id with forceinvoice & report only! - NOT RUNNING invoice+ process!\n");
+                                echo esc_html("Order #$order_id with forceinvoice & report only! - RUNNING invoice+ process ONLY!\n");
+                                $this->invoice_api->payplus_invoice_create_order($order_id);
                             }
                         }
                     }
@@ -3540,6 +3545,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     // Translators: %s will be replaced with the transaction number received from the payment gateway.
                     $order->add_order_note(sprintf(__('PayPlus Subscription Payment Successful<br/>Transaction Number: %s', 'payplus-payment-gateway'), $result->data->number));
                     $insertMeta['payplus_type'] = $result->data->type;
+                    $insertMeta['payplus_response'] = wp_json_encode($result->data);
                     $insertMeta['payplus_transaction_uid'] = $result->data->transaction_uid;
                     $insertMeta['payplus_status_active'] = 1;
                     delete_post_meta($order->get_id(), 'payplus_error_sub');

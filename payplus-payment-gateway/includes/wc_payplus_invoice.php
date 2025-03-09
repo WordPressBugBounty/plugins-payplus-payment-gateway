@@ -1108,6 +1108,9 @@ class PayplusInvoice
                             $resultApps[] = (object) $paymentArray;
                         } else {
                             $method_payment = 'other';
+                            $method_payment = ($order->get_payment_method() === "bacs") ? 'bank-transfer' : $method_payment;
+                            $method_payment = ($order->get_payment_method() === "cod") ? 'cash' : $method_payment;
+                            $method_payment = ($order->get_payment_method() === "cheque") ? 'payment-check' : $method_payment;
                             $otherMethod = strtolower($order->get_payment_method_title());
                             $orOtherMethod = strtolower($order->get_payment_method());
                             $search_terms = ['paypal', 'pay_pal', 'pay pal', 'pay-pal', 'פייפל', 'פיי-פל', 'פיי-פאל', 'פיי פאל', 'פיי פל', 'פיפל', 'פי פל', 'פייפאל', 'פיי פאל', 'פיפאל'];
@@ -1123,7 +1126,10 @@ class PayplusInvoice
                             if (!empty($found_in_other) || !empty($found_in_or_other)) {
                                 $method_payment = 'paypal';
                             }
-                            if (isset($this->payplus_invoice_option['do-not-create']) && in_array($method_payment, $this->payplus_invoice_option['do-not-create'])) {
+                            if (
+                                isset($this->payplus_invoice_option['do-not-create']) && in_array($method_payment, $this->payplus_invoice_option['do-not-create']) ||
+                                isset($this->payplus_invoice_option['do-not-create']) && in_array($order->get_payment_method(), $this->payplus_invoice_option['do-not-create'])
+                            ) {
                                 $order->add_order_note('This payment method is set as: Not to create documents');
                                 return;
                             }

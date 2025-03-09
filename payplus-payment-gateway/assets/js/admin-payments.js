@@ -165,7 +165,10 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $("#get-invoice-plus-data").click(function () {
+    $("#create-invoice-plus-doc").click(function () {
+        if (!confirm("WARNING: This will create an invoice no matter what the order STATUS is... Are you sure you want to create the invoice?")) {
+            return;
+        }
         let loader = $("#order_data").find(".payplus_loader_gpp");
         let side = "right";
 
@@ -182,6 +185,43 @@ jQuery(document).ready(function ($) {
         });
         $("#custom-button-get-pp").fadeOut();
         $("#get-invoice-plus-data").fadeOut();
+        $("#create-invoice-plus-doc").fadeOut();
+        loader.fadeIn();
+
+        var data = {
+            action: "invoice_plus_create",
+            order_id: $("#create-invoice-plus-doc").data("value"),
+            create_invoice: true,
+            _ajax_nonce: payplus_script_admin.payplusCustomAction,
+        };
+
+        $.post(ajaxurl, data, function (response) {
+            loader.fadeOut();
+            location.reload();
+        });
+    });
+
+    $("#get-invoice-plus-data").click(function () {
+        if (!confirm("ATTENTION: This only pulls existing information, only visual data, this does not create any document.")) {
+            return;
+        }
+        let loader = $("#order_data").find(".payplus_loader_gpp");
+        let side = "right";
+
+        // check if page is rtl or ltr and change the direction of the loader
+        if ($("body").hasClass("rtl")) {
+            side = "left";
+        }
+
+        loader.css(side, "5%");
+
+        loader.css({
+            position: "absolute",
+            top: "5px",
+        });
+        $("#custom-button-get-pp").fadeOut();
+        $("#get-invoice-plus-data").fadeOut();
+        $("#create-invoice-plus-doc").fadeOut();
         loader.fadeIn();
 
         var data = {
@@ -220,39 +260,72 @@ jQuery(document).ready(function ($) {
         });
     });
 
-    $(document).on("click", "#payment-payplus-dashboard", function (event) {
-        event.preventDefault();
-        let orderId = $(this).attr("data-id");
-        let $this = $(this);
-        $this.parent(".payment-order-ajax").find(".payplus_loader").fadeIn();
-        $.ajax({
-            type: "post",
-            dataType: "json",
-            url: payplus_script_admin.ajax_url,
-            data: {
-                action: "generate-link-payment",
-                order_id: orderId,
-                _ajax_nonce: payplus_script_admin.payplusGenerateLinkPayment,
-            },
-            success: function (response) {
-                $("#box-payplus-payment").fadeIn();
-                $this
-                    .parent(".payment-order-ajax")
-                    .find(".payplus_loader")
-                    .fadeOut();
+    $(document).on(
+        "click",
+        "#payment-payplus-dashboard, #payment-payplus-dashboard-emv",
+        function (event) {
+            event.preventDefault();
+            let orderId = $(this).attr("data-id");
+            let $this = $(this);
+            $this
+                .parent(".payment-order-ajax")
+                .find(".payplus_loader")
+                .fadeIn();
+            $.ajax({
+                type: "post",
+                dataType: "json",
+                url: payplus_script_admin.ajax_url,
+                data: {
+                    action: "generate-link-payment",
+                    order_id: orderId,
+                    button: $this.attr("id"),
+                    _ajax_nonce:
+                        payplus_script_admin.payplusGenerateLinkPayment,
+                },
+                success: function (response) {
+                    console.log(response);
+                    if ($this.attr("id") === "payment-payplus-dashboard-emv") {
+                        //for device transaction.
+                        const parsedResponse = JSON.parse(response.body);
+                        if (
+                            parsedResponse?.results?.status === "success" &&
+                            parsedResponse?.results?.code === 0
+                        ) {
+                            location.reload();
+                        } else if (
+                            parsedResponse?.results?.status === "error" &&
+                            parsedResponse?.results?.code === 1
+                        ) {
+                            alert(parsedResponse?.results?.description);
+                            $this
+                                .parent(".payment-order-ajax")
+                                .find(".payplus_loader")
+                                .fadeOut();
+                        }
+                        //for device transaction.
+                    } else {
+                        $("#box-payplus-payment").fadeIn();
+                        $this
+                            .parent(".payment-order-ajax")
+                            .find(".payplus_loader")
+                            .fadeOut();
 
-                if (response.status) {
-                    $this.fadeOut();
-                    $("#box-payplus-payment iframe").attr(
-                        "src",
-                        response.payment_response
-                    );
-                } else {
-                    $("#box-payplus-payment").text(response.payment_response);
-                }
-            },
-        });
-    });
+                        if (response.status) {
+                            $this.fadeOut();
+                            $("#box-payplus-payment iframe").attr(
+                                "src",
+                                response.payment_response
+                            );
+                        } else {
+                            $("#box-payplus-payment").text(
+                                response.payment_response
+                            );
+                        }
+                    }
+                },
+            });
+        }
+    );
     $("#order-payment-payplus").click(function (event) {
         event.preventDefault();
         let orderId = $(this).attr("data-id");
@@ -278,9 +351,9 @@ jQuery(document).ready(function ($) {
     $("#payplus-token-payment").click(function (event) {
         event.preventDefault();
         let payplusChargeAmount = $(this)
-                .closest(".delayed-payment")
-                .find("#payplus_charge_amount")
-                .val(),
+            .closest(".delayed-payment")
+            .find("#payplus_charge_amount")
+            .val(),
             payplusOrderId = $(this)
                 .closest(".delayed-payment")
                 .find("#payplus_order_id")
@@ -460,6 +533,9 @@ if (
         jQuery("#woocommerce_payplus-payment-gateway_dev_payment_page_id")
             .closest("tr")
             .show();
+        jQuery("#woocommerce_payplus-payment-gateway_dev_device_uid")
+            .closest("tr")
+            .show();
         jQuery("#woocommerce_payplus-payment-gateway_dev_secret_key")
             .closest("tr")
             .find("label")
@@ -472,6 +548,10 @@ if (
             .closest("tr")
             .find("label")
             .css({ color: "#34aa54" });
+        jQuery("#woocommerce_payplus-payment-gateway_dev_device_uid")
+            .closest("tr")
+            .find("label")
+            .css({ color: "#34aa54" });
         jQuery("#woocommerce_payplus-payment-gateway_api_key")
             .closest("tr")
             .hide();
@@ -479,6 +559,9 @@ if (
             .closest("tr")
             .hide();
         jQuery("#woocommerce_payplus-payment-gateway_payment_page_id")
+            .closest("tr")
+            .hide();
+        jQuery("#woocommerce_payplus-payment-gateway_device_uid")
             .closest("tr")
             .hide();
     }
@@ -493,6 +576,9 @@ if (
         jQuery("#woocommerce_payplus-payment-gateway_dev_payment_page_id")
             .closest("tr")
             .hide();
+        jQuery("#woocommerce_payplus-payment-gateway_dev_device_uid")
+            .closest("tr")
+            .hide();
         jQuery("#woocommerce_payplus-payment-gateway_api_key")
             .closest("tr")
             .show();
@@ -500,6 +586,9 @@ if (
             .closest("tr")
             .show();
         jQuery("#woocommerce_payplus-payment-gateway_payment_page_id")
+            .closest("tr")
+            .show();
+        jQuery("#woocommerce_payplus-payment-gateway_device_uid")
             .closest("tr")
             .show();
         jQuery("#woocommerce_payplus-payment-gateway_secret_key")
@@ -511,6 +600,10 @@ if (
             .find("label")
             .css({ color: "#34aa54" });
         jQuery("#woocommerce_payplus-payment-gateway_payment_page_id")
+            .closest("tr")
+            .find("label")
+            .css({ color: "#34aa54" });
+        jQuery("#woocommerce_payplus-payment-gateway_device_uid")
             .closest("tr")
             .find("label")
             .css({ color: "#34aa54" });
@@ -564,15 +657,15 @@ if (
         jQuery("#woocommerce_payplus-payment-gateway_transaction_type").val()
     ) !== 2
         ? jQuery(
-              "#woocommerce_payplus-payment-gateway_check_amount_authorization"
-          )
-              .closest("tr")
-              .fadeOut()
+            "#woocommerce_payplus-payment-gateway_check_amount_authorization"
+        )
+            .closest("tr")
+            .fadeOut()
         : jQuery(
-              "#woocommerce_payplus-payment-gateway_check_amount_authorization"
-          )
-              .closest("tr")
-              .fadeIn();
+            "#woocommerce_payplus-payment-gateway_check_amount_authorization"
+        )
+            .closest("tr")
+            .fadeIn();
     //display API mode
     if (
         jQuery("#woocommerce_payplus-payment-gateway_api_test_mode").val() ===
@@ -582,8 +675,8 @@ if (
         modeMessage["he"] = "מצב נוכחי: מצב ארגז חול(פיתוח)";
         currentMode = jQuery(
             "<tr><td style='color: red;' id='currentMode'>" +
-                modeMessage[currentLanguage] +
-                "</td></tr></tr>"
+            modeMessage[currentLanguage] +
+            "</td></tr></tr>"
         );
         showDevs();
     } else {
@@ -596,8 +689,8 @@ if (
             modeMessage["he"] = "מצב נוכחי: מצב ייצור";
             currentMode = jQuery(
                 "<tr><td id='currentMode'>" +
-                    modeMessage[currentLanguage] +
-                    "</td></tr></tr>"
+                modeMessage[currentLanguage] +
+                "</td></tr></tr>"
             );
             showProds();
         }
@@ -644,8 +737,8 @@ function payplusMenusDisplay() {
 
         transactionTypeMessage = jQuery(
             "<tr><td id='warningMessage'>" +
-                message[currentLanguage] +
-                "</td></tr></tr>"
+            message[currentLanguage] +
+            "</td></tr></tr>"
         );
         $firstInputWithId.closest("tr").before(transactionTypeMessage);
     }
@@ -730,8 +823,8 @@ function payplusMenusDisplay() {
                 : iframes["payplus-faq"];
         let $settingsContainer = jQuery(
             '<div id="settingsContainer"><div class="tab-section-payplus" id="tab-payplus-gateway"></div><div class="right-tab-section-payplus hideIt"><h2>' +
-                iframeHeadline +
-                "</h2></div>"
+            iframeHeadline +
+            "</h2></div>"
         );
         //Add all existing tables to .tab-section-payplus
         $settingsContainer

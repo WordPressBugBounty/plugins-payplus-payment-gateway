@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.6.7
+ * Version: 7.6.8
  * Tested up to: 6.7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.6.7');
-define('PAYPLUS_VERSION_DB', 'payplus_6_0');
+define('PAYPLUS_VERSION', '7.6.8');
+define('PAYPLUS_VERSION_DB', 'payplus_6_2');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -323,6 +323,9 @@ class WC_PayPlus
                 //failed nonce check, will be redirected to regular thank you page with ipn
                 $order = wc_get_order($order_id);
                 $this->updateStatusesIpn ? $this->checkRunIpnResponse($order_id, $order, 1) : null;
+                if (WC()->cart) {
+                    WC()->cart->empty_cart();
+                }
                 $redirect_to = add_query_arg('order-received', $order_id, get_permalink(wc_get_page_id('checkout')));
                 wp_redirect($redirect_to);
                 exit;
@@ -357,6 +360,9 @@ class WC_PayPlus
             $calculated_hash = hash('sha256', WC()->cart->get_cart_hash() . $received_salt);
 
             if ($stored_cart_hash !== $received_cart_hash || $calculated_hash !== $received_cart_hash) {
+                if (WC()->cart) {
+                    WC()->cart->empty_cart();
+                }
                 $redirect_to = add_query_arg('order-received', $order_id, get_permalink(wc_get_page_id('checkout')));
                 wp_redirect($redirect_to);
                 exit;
