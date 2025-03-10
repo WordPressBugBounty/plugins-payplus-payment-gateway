@@ -3546,8 +3546,10 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     $order->add_order_note(sprintf(__('PayPlus Subscription Payment Successful<br/>Transaction Number: %s', 'payplus-payment-gateway'), $result->data->number));
                     $insertMeta['payplus_type'] = $result->data->type;
                     $insertMeta['payplus_response'] = wp_json_encode($result->data);
+                    $insertMeta['payplus_method'] = "credit-card";
                     $insertMeta['payplus_transaction_uid'] = $result->data->transaction_uid;
                     $insertMeta['payplus_status_active'] = 1;
+                    WC_PayPlus_Meta_Data::update_meta($order, $insertMeta);
                     delete_post_meta($order->get_id(), 'payplus_error_sub');
                     if ($this->recurring_order_set_to_paid === "yes") {
                         $order->payment_complete();
@@ -3556,7 +3558,6 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     } else {
                         $order->update_status('wc-processing');
                     }
-                    WC_PayPlus_Meta_Data::update_meta($order, $insertMeta);
                     return ["success" => true, "msg" => ""];
                 } else {
                     $this->payplus_add_log_all($handle, wp_json_encode($result), 'error');
