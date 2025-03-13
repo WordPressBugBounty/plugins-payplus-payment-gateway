@@ -19,10 +19,13 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         'payplus-payment-gateway-hostedfields',
     );
     public $applePaySettings;
+    public $hostedFieldsSettings;
     public $isApplePayEnabled;
     public $isInvoiceEnable;
     public $useDedicatedMetaBox;
     public $showInvoicePlusButtons;
+    public $showInvoicePlusCreateButton;
+    public $showInvoicePlusGetButton;
     public $isInvoiceManual;
     public $invoiceDisplayOnly;
     public $saveOrderNote;
@@ -82,13 +85,15 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         $payPlusInvoiceOptions = get_option('payplus_invoice_option');
         $this->isInvoiceEnable = isset($payPlusInvoiceOptions['payplus_invoice_enable']) && $payPlusInvoiceOptions['payplus_invoice_enable'] === 'yes' ? true : false;
         $this->useDedicatedMetaBox = isset($payPlusInvoiceOptions['dedicated_invoice_metabox']) && $payPlusInvoiceOptions['dedicated_invoice_metabox'] === 'yes' ? true : false;
-        $this->showInvoicePlusButtons = isset($payPlusInvoiceOptions['show_invoice_plus_buttons']) && $payPlusInvoiceOptions['show_invoice_plus_buttons'] === 'yes' ? true : false;
+        $this->showInvoicePlusCreateButton = isset($payPlusInvoiceOptions['show_invoice_plus_create_button']) && $payPlusInvoiceOptions['show_invoice_plus_create_button'] === 'yes' ? true : false;
+        $this->showInvoicePlusGetButton = isset($payPlusInvoiceOptions['show_invoice_plus_get_button']) && $payPlusInvoiceOptions['show_invoice_plus_get_button'] === 'yes' ? true : false;
         $this->isInvoiceManual = isset($payPlusInvoiceOptions['create-invoice-manual']) && $payPlusInvoiceOptions['create-invoice-manual'] === 'yes' ? true : false;
         $this->invoiceDisplayOnly = isset($payPlusInvoiceOptions['display_only_invoice_docs']) && $payPlusInvoiceOptions['display_only_invoice_docs'] === 'yes' ? true : false;
         $this->allSettings = get_option('woocommerce_payplus-payment-gateway_settings');
         $this->saveOrderNote = isset($this->settings['payplus_data_save_order_note']) ? boolval($this->settings['payplus_data_save_order_note'] === 'yes') : null;
         $this->showPayPlusDataMetabox = isset($this->allSettings['show_payplus_data_metabox']) ? boolval($this->allSettings['show_payplus_data_metabox'] === 'yes') : null;
         $this->applePaySettings = get_option('woocommerce_payplus-payment-gateway-applepay_settings');
+        $this->hostedFieldsSettings = get_option('woocommerce_payplus-payment-gateway-hostedfields_settings');
         $this->isApplePayEnabled = boolval(isset($this->applePaySettings['enabled']) && $this->applePaySettings['enabled'] === "yes");
         // make payment button for j2\j5
         add_action('woocommerce_order_actions_end', [$this, 'make_payment_button'], 10, 1);
@@ -1853,9 +1858,11 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                     echo wp_kses_post($payPlusLoader);
                 }
             }
-        } elseif ($this->isInvoiceEnable && empty($checkInvoiceSend) && $this->showInvoicePlusButtons) {
-            echo '<button type="button" data-value="' . esc_attr($order_id) . '" value="' . esc_attr($transactionUid) . '" title="' . esc_attr(__('This button only syncs Invoice+ documents that exists to the WooCommerce order meta data - this will make the PayPlus metabox show these also.', 'payplus-payment-gateway')) . '" class="button" id="get-invoice-plus-data" style="position: absolute;' . esc_attr($rtl) . ': 10%; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Get Invoice+ Data</button>';
-            if (!$this->isInvoiceManual) {
+        } elseif ($this->isInvoiceEnable && empty($checkInvoiceSend)) {
+            if ($this->showInvoicePlusGetButton) {
+                echo '<button type="button" data-value="' . esc_attr($order_id) . '" value="' . esc_attr($transactionUid) . '" title="' . esc_attr(__('This button only syncs Invoice+ documents that exists to the WooCommerce order meta data - this will make the PayPlus metabox show these also.', 'payplus-payment-gateway')) . '" class="button" id="get-invoice-plus-data" style="position: absolute;' . esc_attr($rtl) . ': 10%; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Get Invoice+ Data</button>';
+            }
+            if (!$this->isInvoiceManual && $this->showInvoicePlusCreateButton) {
                 echo '<button type="button" data-value="' . esc_attr($order_id) . '" value="' . esc_attr($transactionUid) . '" title="' . esc_attr(__('Create the Invoice+ doc for this method type (according to settings), WITHOUT changing the STATUS or effecting the order in any way.', 'payplus-payment-gateway')) . '" class="button" id="create-invoice-plus-doc" style="position: absolute;' . esc_attr($rtl) . ': 20%; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Create Invoice+ Auto Doc</button>';
             }
             echo wp_kses_post($payPlusLoader);
@@ -2101,7 +2108,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                 <iframe scrolling="no" src="" style="width: 100%;height: 900px"></iframe>
             </div>
 
-<?php
+        <?php
         }
         $output = ob_get_clean();
         echo $output; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
@@ -2257,6 +2264,35 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         wp_die();
     }
 
+    public function wc_payplus_show_updates_message()
+    {
+        ?>
+        <div id="wc-payplus-updates-message" class="notice notice-success is-dismissible">
+            <p> <?php
+                echo wp_kses_post(
+                    __(
+                        '<strong style="font-size: 1.2em;">Hello!</strong><br><br>
+
+        <span style="font-size: 1.2em;"><strong>We noticed you are not using our new PayPlus Embedded feature.</strong> It integrates seamlessly into the checkout page, just like a payment page!<br><br>
+        <strong>Why use or switch to PayPlus Embedded?</strong><br><br>
+        - It is a secured payment form that is embedded directly into the checkout page (no loading necessary).<br>
+        - It is faster!<br>
+        - It can operate with or without the standard payment page, handling credit card transactions.<br>
+        - It offers the same security as our payment page.<br>
+        - It can fully replace the traditional credit card payment page.<br>
+        - It is easily configured from the plugin settings with no additional activation or charges.<br><br>
+        
+        Thank you,<br><br>
+        <strong>The PayPlus Team</strong></span>',
+                        'payplus-payment-gateway'
+                    )
+                );
+                ?>
+            </p>
+        </div>
+<?php
+    }
+
     /**
      * @return void
      */
@@ -2272,6 +2308,13 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
             $currentPayment = get_option('woocommerce_' . $currentSection . '_settings');
             $enabled = (isset($currentPayment['enabled']) && $currentPayment['enabled'] === "yes") ? false : true;
             $isInvoice = (!empty($_GET['invoicepayplus']) && $_GET['invoicepayplus'] === "1") ? true : false;
+            if ($currentSection === "payplus-payment-gateway") {
+                $display_count = get_option('wc_payplus_display_embedded_count', 0);
+                if ($display_count < 10) {
+                    add_action('admin_notices', [$this, 'wc_payplus_show_updates_message']);
+                    update_option('wc_payplus_display_embedded_count', $display_count + 1);
+                }
+            }
         }
 
         if (isset($_GET['post']) && isset($_GET['action']) && $_GET['action'] === 'edit') {

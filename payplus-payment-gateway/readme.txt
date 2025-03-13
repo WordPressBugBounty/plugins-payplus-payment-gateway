@@ -4,7 +4,7 @@ Tags: Woocommerce Payment Gateway, Credit Cards, Charges and Refunds, Subscripti
 Requires at least: 3.0.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 7.6.9
+Stable tag: 7.7.0
 PlugIn URL: https://www.payplus.co.il/wordpress
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
@@ -85,6 +85,11 @@ If you get stuck, you can ask for help in the Plugin Forum. or contact us direct
 8. Save your settings, now you have an active payment page!
 
 == Changelog ==
+
+= 7.7.0 - 11-03-2025 =
+
+- Fix   - Subscription orders with the "Mark as paid" option enabled will now correctly be set to "completed" status upon successful renewal.
+- Tweak - Disabled cart hash verification for additional testing due to issues on certain payment method pages.
 
 = 7.6.9 - 10-03-2025 =
 

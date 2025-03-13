@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.6.9
+ * Version: 7.7.0
  * Tested up to: 6.7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,7 +19,7 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.6.9');
+define('PAYPLUS_VERSION', '7.7.0');
 define('PAYPLUS_VERSION_DB', 'payplus_6_3');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
@@ -352,22 +352,22 @@ class WC_PayPlus
         $this->updateStatusesIpn ? $this->checkRunIpnResponse($order_id, $order, 2) : null;
 
         // runs cart check if all nonce checks passed and cart hash check is not disabled.
-        if (!$this->disableCartHashCheck) {
-            $stored_cart_hash = WC_PayPlus_Meta_Data::get_meta($order_id, 'cart_hash', true);
-            $stored_salt = WC_PayPlus_Meta_Data::get_meta($order_id, 'more_info_3', true);
-            $received_cart_hash = isset($_REQUEST['more_info_2']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info_2'])) : '';
-            $received_salt = isset($_REQUEST['more_info_3']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info_3'])) : '';
-            $calculated_hash = hash('sha256', WC()->cart->get_cart_hash() . $received_salt);
+        // if (!$this->disableCartHashCheck) {
+        //     $stored_cart_hash = WC_PayPlus_Meta_Data::get_meta($order_id, 'cart_hash', true);
+        //     $stored_salt = WC_PayPlus_Meta_Data::get_meta($order_id, 'more_info_3', true);
+        //     $received_cart_hash = isset($_REQUEST['more_info_2']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info_2'])) : '';
+        //     $received_salt = isset($_REQUEST['more_info_3']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info_3'])) : '';
+        //     $calculated_hash = hash('sha256', WC()->cart->get_cart_hash() . $received_salt);
 
-            if ($stored_cart_hash !== $received_cart_hash || $calculated_hash !== $received_cart_hash) {
-                if (WC()->cart) {
-                    WC()->cart->empty_cart();
-                }
-                $redirect_to = add_query_arg('order-received', $order_id, get_permalink(wc_get_page_id('checkout')));
-                wp_redirect($redirect_to);
-                exit;
-            }
-        }
+        //     if ($stored_cart_hash !== $received_cart_hash || $calculated_hash !== $received_cart_hash) {
+        //         if (WC()->cart) {
+        //             WC()->cart->empty_cart();
+        //         }
+        //         $redirect_to = add_query_arg('order-received', $order_id, get_permalink(wc_get_page_id('checkout')));
+        //         wp_redirect($redirect_to);
+        //         exit;
+        //     }
+        // }
 
         global $wpdb;
         $tblname = $wpdb->prefix . 'payplus_payment_process';
