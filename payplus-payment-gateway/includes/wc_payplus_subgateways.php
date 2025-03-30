@@ -13,6 +13,7 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
     public $hide_other_charge_methods;
     public $allPayment;
     public $allTypePayment;
+    public $pwGiftCardData; // Store gift card data
 
     /**
      *
@@ -54,6 +55,7 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
 
         $this->default_charge_method = $this->payplus_default_charge_method;
         add_action('woocommerce_receipt_' . $this->id, [$this, 'receipt_page']);
+
         if ($this->settings['enabled'] === null) {
             $this->enabled = 'no';
         }
@@ -203,8 +205,8 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
                 'default' => 'yes'
             ],
             'hide_payplus_gateway' => [
-                'title' => __('Hide PayPlus gateway (No saved tokens)', 'payplus-payment-gateway'),
-                'description' => __('Hide PayPlus gateway if current user has no saved tokens', 'payplus-payment-gateway'),
+                'title' => __('Hide PayPlus gateway (Payment page)', 'payplus-payment-gateway'),
+                'description' => __('Hide PayPlus gateway (Payment page)', 'payplus-payment-gateway'),
                 'type' => 'checkbox',
                 'default' => 'no'
             ],
@@ -214,12 +216,6 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
                 'type' => 'checkbox',
                 'default' => 'no'
             ],
-            // 'hosted_fields_width' => [
-            //     'title' => __('Set width for Embedded container (%)', 'payplus-payment-gateway'),
-            //     'description' => __('This sets the width of the Embedded container in percentage (Max is 100 of the container).', 'payplus-payment-gateway'),
-            //     'type' => 'number',
-            //     'default' => '100'
-            // ],
             'hosted_fields_payments_amount' => [
                 'class' => 'hostedNumberOfpayments',
                 'title' => __('Max number of payments:', 'payplus-payment-gateway'),
@@ -581,9 +577,15 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
             );
         }
         $order = wc_get_order($order_id);
+        $payplus_instance = WC_PayPlus::get_instance();
+        $this->pwGiftCardData = $payplus_instance->pwGiftCardData;
+
+        if (isset($this->pwGiftCardData) && $this->pwGiftCardData && is_array($this->pwGiftCardData['gift_cards']) && count($this->pwGiftCardData['gift_cards']) > 0) {
+            WC_PayPlus_Meta_Data::update_meta($order, ['payplus_pw_gift_cards' => wp_json_encode($this->pwGiftCardData)]);
+        }
         if ($this->id === "payplus-payment-gateway-hostedfields") {
             WC()->session->set('order_awaiting_payment', $order_id);
-            $hostedClass = new WC_PayPlus_HostedFields($order_id, $order, true);
+            $hostedClass = new WC_PayPlus_HostedFields($order_id, $order, true, $this->pwGiftCardData);
         }
         return array(
             'result'   => 'success',

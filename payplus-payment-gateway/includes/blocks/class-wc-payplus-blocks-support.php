@@ -76,9 +76,6 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
         foreach (array_keys($gateways) as $payPlusGateWay) {
             $this->settings['gateways'][] = strpos($payPlusGateWay, 'payplus-payment-gateway') === 0 ? $payPlusGateWay : null;
         }
-        // $this->settings['gateways'] = array_filter($this->settings['gateways'], function ($item) {
-        //     return $item !== "payplus-payment-gateway-hostedfields";
-        // });
         $this->settings['gateways'] = array_values(array_filter($this->settings['gateways']));
         $this->gateway = $gateways[$this->name];
     }
@@ -128,7 +125,25 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
         $wc_tax_enabled = wc_tax_enabled();
         $isTaxIncluded = wc_prices_include_tax();
 
-        if (count($cart)) {
+        if (isset($order) && $order) {
+            $objectProducts = $WC_PayPlus_Gateway->payplus_get_products_by_order_id($order_id);
+            foreach ($objectProducts->productsItems as $item) {
+                $product = json_decode($item, true);
+                $productId = isset($product['barcode']) ? $product['barcode'] : str_replace(' ', '', $product['name']);
+                $product_name = $product['name'];
+                $product_quantity = $product['quantity'];
+                $product_total = $product['price'];
+                $productVat = isset($product['vat_type']) ? $product['vat_type'] : 0;
+
+                $products[] = array(
+                    'title' => $product_name,
+                    'priceProductWithTax' => number_format($product_total, 2, '.', ''),
+                    'barcode' => $productId,
+                    'quantity' => $product_quantity,
+                    'vat_type' => $productVat,
+                );
+            }
+        } elseif (count($cart)) {
             foreach ($cart as $cart_item_key => $cart_item) {
                 $productId = $cart_item['product_id'];
 
@@ -244,58 +259,6 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
         $shippingPrice = 0;
         if ($order_id !== "000" && isset($order) && $order) {
             WC()->session->set('order_awaiting_payment', $order_id);
-            $shipping_items = $order->get_items('shipping');
-            if ($WC_PayPlus_Gateway->add_product_field_transaction_type) {
-                if ($WC_PayPlus_Gateway->payplus_check_all_product($order, "2")) {
-                    $data->charge_method = 2;
-                } elseif ($WC_PayPlus_Gateway->payplus_check_all_product($order, "1")) {
-                    $data->charge_method = 1;
-                }
-            }
-            // Check if there are shipping items
-            if (! empty($shipping_items)) {
-                foreach ($shipping_items as $shipping_item) {
-                    // Get the shipping method ID (e.g., 'flat_rate:1')
-                    $method_id = $shipping_item->get_method_id();
-
-                    // Get the shipping method title (e.g., 'Flat Rate')
-                    $method_title = $shipping_item->get_method_title();
-                    $shipping_cost = $shipping_item->get_total();
-                    $shipping_taxes = $shipping_item->get_taxes();
-
-                    $shipping_tax_total = $wc_tax_enabled ? array_sum($shipping_taxes['total']) : 0;
-
-
-                    $item = new stdClass();
-                    $item->name = $method_title;
-                    $item->quantity = 1;
-                    $item->price = $shipping_cost + array_sum($shipping_taxes['total']);
-                    $shippingPrice = $item->price;
-                    $item->vat_type = $shipping_tax_total > 0 ? 1 : 0;
-                    $data->items[] = $item;
-                }
-            }
-
-            $totalAmount = 0;
-            foreach ($data->items as $item) {
-                $totalAmount += $item->price * $item->quantity;
-            }
-            $totalBeforeDiscount = $totalAmount - $shippingPrice;
-
-            $coupon_items = $order->get_items('coupon');
-            foreach ($coupon_items as $coupon_item_id => $coupon_item) {
-                // Retrieve details
-                $coupon_code = $coupon_item->get_code(); // The coupon code
-                $discount = $coupon_item->get_discount(); // Discount amount
-                $discount_tax = $coupon_item->get_discount_tax(); // Discount tax amount
-
-                $item = new stdClass();
-                $item->name = "coupon_discount_$coupon_code";
-                $item->quantity = 1;
-                $item->price = -number_format($discount + $discount_tax, 2, '.', '');
-                $item->vat_type = -$discount_tax > 0 ? 1 : 0;
-                $data->items[] = $item;
-            }
         }
 
         $totalAmount = 0;
@@ -305,7 +268,7 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
 
         $data->amount = number_format($totalAmount, 2, '.', '');
 
-        $payload = wp_json_encode($data);
+        $payload = wp_json_encode($data, JSON_UNESCAPED_UNICODE);
         is_int($data->more_info) && $data->more_info === $order_id ? WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload' => $payload]) : null;
         if (WC()->session->get('hostedPayload') === $payload) {
             // WC()->session->set('hostedStarted', false);

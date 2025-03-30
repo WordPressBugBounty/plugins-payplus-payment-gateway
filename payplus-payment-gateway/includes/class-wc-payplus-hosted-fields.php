@@ -20,12 +20,13 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
     public $isHostedStarted;
     public $isPlaceOrder;
     public $showSubmitButton;
+    public $pwGiftCardData;
 
 
     /**
      *
      */
-    public function __construct($order_id = "000", $order = null, $isPlaceOrder = false)
+    public function __construct($order_id = "000", $order = null, $isPlaceOrder = false, $pwGiftCardData = false)
     {
         $this->payPlusGateway = $this->get_main_payplus_gateway();
         $this->isHideLoaderLogo = boolval(isset($this->payPlusGateway->hostedFieldsOptions['hide_loader_logo']) && $this->payPlusGateway->hostedFieldsOptions['hide_loader_logo'] === 'yes');
@@ -39,6 +40,9 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $this->order = $order;
         $this->isPlaceOrder = $isPlaceOrder;
         $this->showSubmitButton = isset($this->payPlusGateway->hostedFieldsOptions['show_hide_submit_button']) && $this->payPlusGateway->hostedFieldsOptions['show_hide_submit_button'] === 'yes';
+        if ($pwGiftCardData) {
+            $this->pwGiftCardData = $pwGiftCardData;
+        }
 
         define('API_KEY', $this->apiKey);
         define('SECRET_KEY', $this->secretKey);
@@ -171,7 +175,42 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $wc_tax_enabled = wc_tax_enabled();
         $isTaxIncluded = wc_prices_include_tax();
 
-        if (count($cart)) {
+        if (isset($order) && $order) {
+            $products = [];
+            if (isset($this->pwGiftCardData) && $this->pwGiftCardData && is_array($this->pwGiftCardData['gift_cards'])) {
+                foreach ($this->pwGiftCardData['gift_cards'] as $giftCardId => $giftCard) {
+                    $priceGift = 0;
+                    $productPrice = -1 * ($giftCard);
+                    $priceGift += number_format($productPrice, 2, '.', '');
+
+                    $giftCards = [
+                        'title' => __('PW Gift Card', 'payplus-payment-gateway'),
+                        'barcode' => $giftCardId,
+                        'quantity' => 1,
+                        'priceProductWithTax' => $priceGift,
+                    ];
+
+                    $products[] = $giftCards;
+                }
+            }
+            $objectProducts = $this->payPlusGateway->payplus_get_products_by_order_id($order_id);
+            foreach ($objectProducts->productsItems as $item) {
+                $product = json_decode($item, true);
+                $productId = isset($product['barcode']) ? $product['barcode'] : str_replace(' ', '', $product['name']);
+                $product_name = $product['name'];
+                $product_quantity = $product['quantity'];
+                $product_total = $product['price'];
+                $productVat = isset($product['vat_type']) ? $product['vat_type'] : 0;
+
+                $products[] = array(
+                    'title' => $product_name,
+                    'priceProductWithTax' => number_format($product_total, 2, '.', ''),
+                    'barcode' => $productId,
+                    'quantity' => $product_quantity,
+                    'vat_type' => $productVat,
+                );
+            }
+        } elseif (count($cart)) {
             foreach ($cart as $cart_item_key => $cart_item) {
                 $productId = $cart_item['product_id'];
 
@@ -179,15 +218,14 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
                     $product = new WC_Product_Variable($productId);
                     $productData = $product->get_available_variation($cart_item['variation_id']);
                     $tax = (WC()->cart->get_total_tax()) ? WC()->cart->get_total_tax() / $cart_item['quantity'] : 0;
-                    $tax = round($tax, $this->payPlusGateway->rounding_decimals);
-                    $priceProductWithTax = round($productData['display_price'] + $tax, ROUNDING_DECIMALS);
-                    $priceProductWithoutTax = round($productData['display_price'], ROUNDING_DECIMALS);
+                    $tax = number_format($tax, 2, '.', '');
+                    $priceProductWithTax = number_format($productData['display_price'] + $tax, 2, '.', '');
+                    $priceProductWithoutTax = number_format($productData['display_price'], 2, '.', '');
                 } else {
                     $product = new WC_Product($productId);
-                    $priceProductWithTax = round(wc_get_price_including_tax($product), ROUNDING_DECIMALS);
-                    $priceProductWithoutTax = round(wc_get_price_excluding_tax($product), ROUNDING_DECIMALS);
+                    $priceProductWithTax = number_format(wc_get_price_including_tax($product), 2, '.', '');
+                    $priceProductWithoutTax = number_format(wc_get_price_excluding_tax($product), 2, '.', '');
                 }
-
 
                 $productVat = 0;
 
@@ -209,7 +247,7 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
             }
 
             if (WC()->cart->get_total_discount()) {
-                $discountPrice = round(floatval(WC()->cart->get_discount_total()), ROUNDING_DECIMALS);
+                $discountPrice = number_format(floatval(WC()->cart->get_discount_total()), 2, '.', '');
             }
         }
 
@@ -276,7 +314,7 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
             $item->quantity = $product['quantity'];
             $item->barcode = $product['barcode'];
             $item->price = $product['priceProductWithTax'];
-            $item->vat_type = $product['vat_type'];
+            isset($product['vat_type']) ? $item->vat_type = $product['vat_type'] : $payingVat;
             $data->items[] = $item;
         }
 
@@ -286,80 +324,8 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $order_id = $order_id === "000" ? $this->updateOrderId($randomHash) : $order_id;
         $data->more_info = $order_id;
 
-        $shippingPrice = 0;
         if ($order_id !== "000" && isset($order) && $order) {
             WC()->session->set('order_awaiting_payment', $order_id);
-            $shipping_items = $order->get_items('shipping');
-            if ($this->payPlusGateway->add_product_field_transaction_type) {
-                if ($this->payPlusGateway->payplus_check_all_product($order, "2")) {
-                    $data->charge_method = 2;
-                } elseif ($this->payPlusGateway->payplus_check_all_product($order, "1")) {
-                    $data->charge_method = 1;
-                }
-            }
-            // Check if there are shipping items
-            if (! empty($shipping_items)) {
-
-                foreach ($shipping_items as $shipping_item) {
-                    // Get the shipping method ID (e.g., 'flat_rate:1')
-                    $method_id = $shipping_item->get_method_id();
-
-                    // Get the shipping method title (e.g., 'Flat Rate')
-                    $method_title = $shipping_item->get_method_title();
-                    $shipping_cost = $shipping_item->get_total();
-                    $shipping_taxes = $shipping_item->get_taxes();
-
-                    $shipping_tax_total = $wc_tax_enabled ? array_sum($shipping_taxes['total']) : 0;
-
-                    $item = new stdClass();
-                    $item->name = $method_title;
-                    $item->quantity = 1;
-                    $item->price = $shipping_cost + array_sum($shipping_taxes['total']);
-                    $shippingPrice = $item->price;
-                    $item->vat_type = $shipping_tax_total > 0 ? 1 : 0;
-                    $data->items[] = $item;
-                }
-            }
-
-            $totalAmount = 0;
-            foreach ($data->items as $item) {
-                $totalAmount += $item->price * $item->quantity;
-            }
-            $totalBeforeDiscount = $totalAmount - $shippingPrice;
-
-            $coupon_items = $order->get_items('coupon');
-            foreach ($coupon_items as $coupon_item_id => $coupon_item) {
-                // Retrieve details
-                $coupon_code = $coupon_item->get_code(); // The coupon code
-                $discount = $coupon_item->get_discount(); // Discount amount
-                $discount_tax = $coupon_item->get_discount_tax(); // Discount tax amount
-
-                $item = new stdClass();
-                $item->name = "coupon_discount_$coupon_code";
-                $item->quantity = 1;
-                $item->price = -number_format($discount + $discount_tax, 2, '.', '');
-                $item->vat_type = -$discount_tax > 0 ? 1 : 0;
-                $data->items[] = $item;
-            }
-
-            $gift_cards = $order->get_meta('_ywgc_applied_gift_cards');
-            $updated_as_fee = $order->get_meta('ywgc_gift_card_updated_as_fee');
-            $priceGift = 0;
-            $allProductSku = "";
-            if ($gift_cards && $updated_as_fee == false) {
-
-                foreach ($gift_cards as $key => $gift) {
-                    $productPrice = -1 * ($gift);
-                    $allProductSku .= (empty($allProductSku)) ? " ( " . $key : ' , ' . $key;
-                    $priceGift += round($productPrice, ROUNDING_DECIMALS);
-                }
-
-                $item = new stdClass();
-                $item->name = "coupon_discount_$allProductSku";
-                $item->quantity = 1;
-                $item->price = number_format($priceGift, 2, '.', '');
-                $data->items[] = $item;
-            }
         }
 
         $totalAmount = 0;
@@ -373,7 +339,7 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $data->amount = number_format($totalAmount, 2, '.', '');
         $firstMessage = $order_id === "000" ? "-=#* 1st field generated *%=- - " : "";
 
-        $payload = wp_json_encode($data);
+        $payload = wp_json_encode($data, JSON_UNESCAPED_UNICODE);
         is_int($data->more_info) && $data->more_info === $order_id ? WC_PayPlus_Meta_Data::update_meta($order, ['payplus_hosted_page_request_uid' => $hostedResponseArray['payment_page_uid'], 'payplus_payload' => $payload]) : null;
 
         $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", "HostedFields-hostedFieldsData-Class Payload: \n$payload");

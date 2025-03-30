@@ -10,6 +10,8 @@ jQuery(function ($) {
     let payPlusMain = "payment_method_payplus-payment-gateway";
     let payPlusHosted = "payment_method_payplus-payment-gateway-hostedfields";
     let inputPayPlus = payPlusHosted;
+    var $hostedDiv = jQuery("body > div.container.hostedFields");
+    let firstTime = true;
 
     $.blockUI.defaults.overlayCSS.cursor = "default";
     let hasSavedCCs = Object.keys(payplus_script_checkout.hasSavedTokens);
@@ -36,57 +38,62 @@ jQuery(function ($) {
         });
     }
 
-    if (payplus_script_checkout.isHostedFields) {
-        // Add save token checkbox to hosted fields container //
-        var $hostedDiv = jQuery("body > div.container.hostedFields");
-        var $checkbox = $(
-            '<p class="hf-save form-row">' +
-                '<label for="save_token_checkbox">' +
-                '<input type="checkbox" name="wc-save-token" id="save_token_checkbox" value="1" style="margin:0 10px 0 10px;"/>' +
-                " " +
-                payplus_script_checkout.saveCreditCard +
-                "</label>" +
-                "</p>"
-        );
-
-        payplus_script_checkout.isLoggedIn &&
-        payplus_script_checkout.isSavingCerditCards
-            ? $hostedDiv.append($checkbox)
-            : null;
-
-        if (hasSavedCCs.length === 0) {
-            setTimeout(function () {
-                $("input#" + inputPayPlus).prop("checked", true);
-                // $("#submit-payment").hide();
-                $("div.container.hostedFields").show();
-            }, 2000);
-        } else {
-            setTimeout(function () {
-                $(".payment_method_payplus-payment-gateway").css(
-                    "display",
-                    "block"
+    function hostedFieldsSetup() {
+        if (payplus_script_checkout.isHostedFields) {
+            if (firstTime) {
+                firstTime = false;
+                console.log($hostedDiv.parent().attr("class"));
+                // Add save token checkbox to hosted fields container //
+                var $checkbox = $(
+                    '<p class="hf-save form-row">' +
+                        '<label for="save_token_checkbox">' +
+                        '<input type="checkbox" name="wc-save-token" id="save_token_checkbox" value="1" style="margin:0 10px 0 10px;"/>' +
+                        " " +
+                        payplus_script_checkout.saveCreditCard +
+                        "</label>" +
+                        "</p>"
                 );
-                $("input#" + inputPayPlus).prop("checked", false);
-                if ($("input#" + inputPayPlus).prop("checked")) {
-                    $("div.container.hostedFields").show();
-                    //   $("#submit-payment").hide();
+
+                payplus_script_checkout.isLoggedIn &&
+                payplus_script_checkout.isSavingCerditCards
+                    ? $hostedDiv.append($checkbox)
+                    : null;
+
+                if (hasSavedCCs.length === 0) {
+                    setTimeout(function () {
+                        $("input#" + inputPayPlus).prop("checked", true);
+                        $("div.container.hostedFields").show();
+                    }, 1000);
+                } else {
+                    setTimeout(function () {
+                        $(".payment_method_payplus-payment-gateway").css(
+                            "display",
+                            "block"
+                        );
+                        $("input#" + inputPayPlus).removeAttr("checked");
+                        $(".container.hostedFields").hide();
+                        $(
+                            ".payment_box.payment_method_payplus-payment-gateway-hostedfields"
+                        ).hide();
+                        const mainPayPlus =
+                            "payment_method_payplus-payment-gateway";
+                        $("input#" + mainPayPlus).prop("checked", true);
+                    }, 1000);
                 }
-                const mainPayPlus = "payment_method_payplus-payment-gateway";
-                $("input#" + mainPayPlus).prop("checked", true);
-            }, 2000);
-        }
-        $(document).on("change", 'input[name="payment_method"]', function () {
-            // Check if the hosted fields radio input is NOT checked
-            if (!$("input#" + inputPayPlus).is(":checked")) {
-                // $("#submit-payment").hide();
-                $("div.container.hostedFields").show();
-                $(".container.hostedFields").hide();
-                // $("button#place_order").show();
-            } else {
-                $("div.container.hostedFields").show();
-                // $("#submit-payment").hide();
             }
-        });
+            $(document).on(
+                "change",
+                'input[name="payment_method"]',
+                function () {
+                    // Check if the hosted fields radio input is NOT checked
+                    if (!$("input#" + inputPayPlus).is(":checked")) {
+                        $(".container.hostedFields").hide();
+                    } else {
+                        $("div.container.hostedFields").show();
+                    }
+                }
+            );
+        }
     }
 
     var wc_checkout_form = {
@@ -601,6 +608,11 @@ jQuery(function ($) {
                             putHostedFields(inputPayPlus, hostedIsMain);
                         }
                         wc_checkout_form.fragments = data.fragments;
+                        if (
+                            $hostedDiv.parent().attr("class") === "pp_iframe_h"
+                        ) {
+                            hostedFieldsSetup();
+                        }
                     }
                     var coupons = [];
                     var couponCode;
@@ -668,7 +680,8 @@ jQuery(function ($) {
                                 ).is(":checked")
                             ) {
                                 $(".container.hostedFields").show();
-                                const ppIframeH = document.querySelector(".pp_iframe_h");
+                                const ppIframeH =
+                                    document.querySelector(".pp_iframe_h");
                                 if (ppIframeH) {
                                     ppIframeH.style.display = "block";
                                 }
@@ -1345,6 +1358,7 @@ jQuery(function ($) {
                 function (index, value) {
                     var $img = $("<img>", {
                         src: value,
+                        class: "payplus-checkout-image", // Optional: Add a class to the image
                         alt: "Image " + (index + 1), // Optional: Set alt text for accessibility
                         style: "max-width: 100%; max-height:35px;object-fit: contain;", // Optional: Set inline styles
                     });

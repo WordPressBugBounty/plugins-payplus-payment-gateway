@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.7.0
+ * Version: 7.7.1
  * Tested up to: 6.7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,7 +19,7 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.7.0');
+define('PAYPLUS_VERSION', '7.7.1');
 define('PAYPLUS_VERSION_DB', 'payplus_6_3');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
@@ -41,6 +41,7 @@ class WC_PayPlus
     public $shipping_woo_js;
     public $disableCartHashCheck;
     public $updateStatusesIpn;
+    public $pwGiftCardData;
 
     /**
      * The main PayPlus gateway instance. Use get_main_payplus_gateway() to access it.
@@ -69,8 +70,6 @@ class WC_PayPlus
         $this->secret_key = boolval($this->payplus_payment_gateway_settings->api_test_mode === "yes") ? $this->payplus_payment_gateway_settings->dev_secret_key ?? null : $this->payplus_payment_gateway_settings->secret_key;
 
         add_action('admin_init', [$this, 'check_environment']);
-        // add_action('admin_init', [$this, 'wc_payplus_check_version']);
-
         add_action('admin_notices', [$this, 'admin_notices'], 15);
         add_action('plugins_loaded', [$this, 'init']);
         add_action('manage_product_posts_custom_column', [$this, 'payplus_custom_column_product'], 10, 2);
@@ -89,6 +88,7 @@ class WC_PayPlus
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), [$this, 'plugin_action_links']);
         add_filter('woocommerce_available_payment_gateways', [$this, 'payplus_applepay_disable_manager']);
         add_filter('cron_schedules', [$this, 'payplus_add_custom_cron_schedule']);
+        add_filter('pwgc_redeeming_session_data', [$this, 'modify_gift_card_session_data'], 10, 2);
 
         if (boolval($this->isPayPlus && isset($this->payplus_payment_gateway_settings->payplus_cron_service) && $this->payplus_payment_gateway_settings->payplus_cron_service === 'yes')) {
             $this->payPlusCronActivate();
@@ -101,6 +101,13 @@ class WC_PayPlus
         } else {
             $this->payPlusCronDeactivate();
         }
+    }
+
+    public function modify_gift_card_session_data($session_data, $gift_card_number)
+    {
+        // Modify session data if necessary
+        $this->pwGiftCardData = $session_data;
+        return $session_data;
     }
 
     public function wc_payplus_check_version()
@@ -344,30 +351,7 @@ class WC_PayPlus
 
         $order_id = isset($REQUEST['more_info']) ? sanitize_text_field(wp_unslash($REQUEST['more_info'])) : '';
         $order = wc_get_order($order_id);
-
-        // $current_url = home_url(add_query_arg(null, null));
-        // $order_key = $order->get_order_key();
-        // $isRightKey = strpos($current_url, 'key=' . $order_key) !== false;
-
         $this->updateStatusesIpn ? $this->checkRunIpnResponse($order_id, $order, 2) : null;
-
-        // runs cart check if all nonce checks passed and cart hash check is not disabled.
-        // if (!$this->disableCartHashCheck) {
-        //     $stored_cart_hash = WC_PayPlus_Meta_Data::get_meta($order_id, 'cart_hash', true);
-        //     $stored_salt = WC_PayPlus_Meta_Data::get_meta($order_id, 'more_info_3', true);
-        //     $received_cart_hash = isset($_REQUEST['more_info_2']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info_2'])) : '';
-        //     $received_salt = isset($_REQUEST['more_info_3']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info_3'])) : '';
-        //     $calculated_hash = hash('sha256', WC()->cart->get_cart_hash() . $received_salt);
-
-        //     if ($stored_cart_hash !== $received_cart_hash || $calculated_hash !== $received_cart_hash) {
-        //         if (WC()->cart) {
-        //             WC()->cart->empty_cart();
-        //         }
-        //         $redirect_to = add_query_arg('order-received', $order_id, get_permalink(wc_get_page_id('checkout')));
-        //         wp_redirect($redirect_to);
-        //         exit;
-        //     }
-        // }
 
         global $wpdb;
         $tblname = $wpdb->prefix . 'payplus_payment_process';
@@ -762,6 +746,7 @@ class WC_PayPlus
             public function load_checkout_assets()
             {
                 $script_version = filemtime(plugin_dir_path(__FILE__) . 'assets/js/front.min.js');
+                $css_script_version = filemtime(plugin_dir_path(__FILE__) . 'assets/css/style.min.css');
                 $importAapplepayScript = null;
                 $isModbile = (wp_is_mobile()) ? true : false;
                 $multipassIcons = WC_PayPlus_Statics::getMultiPassIcons();
@@ -786,7 +771,7 @@ class WC_PayPlus
                         }
                     }
 
-                    wp_scripts()->registered['wc-checkout']->src = PAYPLUS_PLUGIN_URL . 'assets/js/checkout.min.js?ver=11' . PAYPLUS_VERSION;
+                    wp_scripts()->registered['wc-checkout']->src = PAYPLUS_PLUGIN_URL . 'assets/js/checkout.min.js?ver=2' . PAYPLUS_VERSION;
                     if ($this->isApplePayGateWayEnabled || $this->isApplePayExpressEnabled) {
                         if (in_array($this->payplus_payment_gateway_settings->display_mode, ['samePageIframe', 'popupIframe', 'iframe'])) {
                             $importAapplepayScript = PAYPLUS_PLUGIN_URL . 'assets/js/script.js' . '?ver=' . PAYPLUS_VERSION;
@@ -833,7 +818,7 @@ class WC_PayPlus
                     ) {
                         $this->payplus_gateway = $this->get_main_payplus_gateway();
                         add_filter('body_class', [$this, 'payplus_body_classes']);
-                        wp_enqueue_style('payplus-css', PAYPLUS_PLUGIN_URL . 'assets/css/style.min.css', [], $script_version);
+                        wp_enqueue_style('payplus-css', PAYPLUS_PLUGIN_URL . 'assets/css/style.min.css', [], $css_script_version);
 
                         if ($isEnableOneClick) {
                             $payment_url_google_pay_iframe = $this->payplus_gateway->payplus_iframe_google_pay_oneclick;
@@ -1381,5 +1366,4 @@ class WC_PayPlus
         register_activation_hook(__FILE__, 'checkSetPayPlusOptions');
         register_activation_hook(__FILE__, 'payplusGenerateErrorPage');
         register_activation_hook(__FILE__, 'display_hash_check_notice');
-        // register_activation_hook(__FILE__, 'cron_activate');
         register_deactivation_hook(__FILE__, 'payplus_cron_deactivate');

@@ -442,13 +442,13 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                     $status = "";
                     if ($responseBody['data']['status'] === 'approved' && $responseBody['data']['status_code'] === '000') {
                         if ($responseBody['data']['type'] === 'Charge') {
-                            WC_PayPlus_Meta_Data::sendMoreInfo($order, 'wc-processing', $transactionUid);
-                            $order->update_status('wc-processing');
-                            $status = 'processing';
-                            if ($this->saveOrderNote) {
-                                $order->add_order_note(
-                                    $successNote
-                                );
+                            if ($this->fire_completed && $this->successful_order_status === 'default-woo') {
+                                WC_PayPlus_Meta_Data::sendMoreInfo($order, 'process_payment->firePaymentComplete', $transactionUid);
+                                $order->payment_complete();
+                            }
+                            if ($this->successful_order_status !== 'default-woo') {
+                                WC_PayPlus_Meta_Data::sendMoreInfo($order,  'process_payment->' . $this->successful_order_status, $transactionUid);
+                                $order->update_status($this->successful_order_status);
                             }
                         } elseif ($responseBody['data']['type'] === 'Approval') {
                             WC_PayPlus_Meta_Data::sendMoreInfo($order, 'wc-on-hold', $transactionUid);
@@ -467,11 +467,13 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                     }
                 }
             } else {
-                $result = $responseBody['data']['status'] ?? $responseBody['results']['description'];
-                $note = $result . ' - If token payment - token doesn`t fit billing or no payment.';
-                $note = !$isCron ? $note : 'Cron job: ' . $result;
-                $note = "Cron job: " ? "$note - No transaction data." : $note;
-                $order->add_order_note('PayPlus IPN: ' . $note);
+                $result = $responseBody['data']['status'] ?? $responseBody['results']['description'] ?? '';
+                if ($result !== "missing-transaction_uid-or-payment_request_uid") {
+                    $note = $result . ' - If token payment - token doesn`t fit billing or no payment.';
+                    $note = !$isCron ? $note : 'Cron job: ' . $result;
+                    $note = "Cron job: " ? "$note - No transaction data." : $note;
+                    $order->add_order_note('PayPlus IPN: ' . $note);
+                }
             }
             if ($allowReturn) {
                 if (!isset($responseBody['data']['status'])) {
@@ -924,9 +926,12 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
             if ($deviceTransaction) {
                 $payload = json_decode($payload, true);
                 $payload['credit_terms'] = 1;
+                $payload['products'] = $payload['items'];
+                unset($payload['items']);
                 $payload['device_uid'] = $this->device_uid;
                 $chargeMethod = $payload['charge_method'];
                 unset($payload['payment_page_uid']);
+                $payload = wp_json_encode($payload, JSON_UNESCAPED_UNICODE);
             }
             $paymentUrl = !$deviceTransaction ? $this->payment_url : $this->devicePaymentUrl;
             WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload' => $payload]);
@@ -1828,7 +1833,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
             </tbody>
         </table>
         <div id="payplus_sum_payment"></div>
-        <?php
+    <?php
     }
 
     /**
@@ -1840,6 +1845,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         $order_id = $order->get_id();
         $payplusResponse = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response', true);
         $pageRequestUid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid', true);
+        $hostedPageRequestUid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_hosted_page_request_uid', true);
         $transactionUid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_transaction_uid', true);
         $checkInvoiceSend = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_check_invoice_send', true);
         $rtl = is_rtl() ? 'left' : 'right';
@@ -1848,25 +1854,30 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                           <div class='loader-background'><div class='text'></div></div>
                         </div>
                       </div>";
-
-        if ($order->get_status() === 'pending' || $this->showGetPayPlusDataButton) {
-            if (!empty($payplusResponse) || !empty($pageRequestUid)) {
-                $payplusResponse = json_decode($payplusResponse, true);
-                $pageRequestUid = isset($payplusResponse['page_request_uid']) ? $payplusResponse['page_request_uid'] : $pageRequestUid;
-                if (!empty($pageRequestUid)) {
-                    echo '<button type="button" data-value="' . esc_attr($order_id) . '" value="' . esc_attr($pageRequestUid) . '" title="' . esc_attr(__('This button triggers an IPN process based on the payment page request UID, retrieving relevant data and updating the order accordingly. If the charge or approval is successful, the order status will automatically update to the default status. Please be aware of this behavior.', 'payplus-payment-gateway')) . '" class="button" id="custom-button-get-pp" style="position: absolute;' . esc_attr($rtl) . ': 5px; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Get PayPlus Data</button>';
-                    echo wp_kses_post($payPlusLoader);
+    ?>
+        <div class="payplus-order-buttons">
+            <?php
+            if ($order->get_status() === 'pending' || $this->showGetPayPlusDataButton) {
+                if (!empty($payplusResponse) || !empty($pageRequestUid)) {
+                    $payplusResponse = json_decode($payplusResponse, true);
+                    $pageRequestUid = isset($payplusResponse['page_request_uid']) ? $payplusResponse['page_request_uid'] : $pageRequestUid;
+                    if (!empty($pageRequestUid)) {
+                        echo '<button type="button" data-value="' . esc_attr($order_id) . '" value="' . esc_attr($pageRequestUid) . '" title="' . esc_attr(__('This button triggers an IPN process based on the payment page request UID, retrieving relevant data and updating the order accordingly. If the charge or approval is successful, the order status will automatically update to the default status. Please be aware of this behavior.', 'payplus-payment-gateway')) . '" class="button" id="custom-button-get-pp" style="position: absolute;' . esc_attr($rtl) . ': 5px; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Get PayPlus Data</button>';
+                        echo wp_kses_post($payPlusLoader);
+                    }
                 }
             }
-        } elseif ($this->isInvoiceEnable && empty($checkInvoiceSend)) {
-            if ($this->showInvoicePlusGetButton) {
-                echo '<button type="button" data-value="' . esc_attr($order_id) . '" value="' . esc_attr($transactionUid) . '" title="' . esc_attr(__('This button only syncs Invoice+ documents that exists to the WooCommerce order meta data - this will make the PayPlus metabox show these also.', 'payplus-payment-gateway')) . '" class="button" id="get-invoice-plus-data" style="position: absolute;' . esc_attr($rtl) . ': 10%; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Get Invoice+ Data</button>';
+            if ($this->isInvoiceEnable && empty($checkInvoiceSend)) {
+                if ($this->showInvoicePlusGetButton) {
+                    echo '<button type="button" data-value="' . esc_attr($order_id) . '" value="' . esc_attr($transactionUid) . '" title="' . esc_attr(__('This button only syncs Invoice+ documents that exists to the WooCommerce order meta data - this will make the PayPlus metabox show these also.', 'payplus-payment-gateway')) . '" class="button" id="get-invoice-plus-data" style="position: absolute;' . esc_attr($rtl) . ': 10%; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Get Invoice+ Data</button>';
+                }
+                if (!$this->isInvoiceManual && $this->showInvoicePlusCreateButton) {
+                    echo '<button type="button" data-value="' . esc_attr($order_id) . '" value="' . esc_attr($transactionUid) . '" title="' . esc_attr(__('Create the Invoice+ doc for this method type (according to settings), WITHOUT changing the STATUS or effecting the order in any way.', 'payplus-payment-gateway')) . '" class="button" id="create-invoice-plus-doc" style="position: absolute;' . esc_attr($rtl) . ': 20%; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Create Invoice+ Auto Doc</button>';
+                }
+                echo wp_kses_post($payPlusLoader);
             }
-            if (!$this->isInvoiceManual && $this->showInvoicePlusCreateButton) {
-                echo '<button type="button" data-value="' . esc_attr($order_id) . '" value="' . esc_attr($transactionUid) . '" title="' . esc_attr(__('Create the Invoice+ doc for this method type (according to settings), WITHOUT changing the STATUS or effecting the order in any way.', 'payplus-payment-gateway')) . '" class="button" id="create-invoice-plus-doc" style="position: absolute;' . esc_attr($rtl) . ': 20%; top: 0; margin: 10px 0 0 0; color: white; background-color: #35aa53; border-radius: 15px;">Create Invoice+ Auto Doc</button>';
-            }
-            echo wp_kses_post($payPlusLoader);
-        }
+            ?></div>
+        <?php
     }
 
     /**
@@ -1888,7 +1899,6 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         $resultApps = $this->payPlusInvoice->payplus_get_payments($orderId, 'otherClub');
         $checkInvoiceRefundSend = WC_PayPlus_Meta_Data::get_meta($orderId, 'payplus_send_refund', true);
         $sum = 0;
-
         $sumTransactionRefund = array_reduce($resultApps, function ($sum, $item) {
             return $sum + $item->invoice_refund;
         });
@@ -2311,8 +2321,8 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
             if ($currentSection === "payplus-payment-gateway") {
                 $display_count = get_option('wc_payplus_display_embedded_count', 0);
                 if ($display_count < 10) {
-                    add_action('admin_notices', [$this, 'wc_payplus_show_updates_message']);
-                    update_option('wc_payplus_display_embedded_count', $display_count + 1);
+                    $this->hostedFieldsSettings['enabled'] !== "yes" ? add_action('admin_notices', [$this, 'wc_payplus_show_updates_message']) : null;
+                    $this->hostedFieldsSettings['enabled'] !== "yes" ? update_option('wc_payplus_display_embedded_count', $display_count + 1) : null;
                 }
             }
         }

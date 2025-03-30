@@ -4,7 +4,7 @@ Tags: Woocommerce Payment Gateway, Credit Cards, Charges and Refunds, Subscripti
 Requires at least: 3.0.1
 Tested up to: 6.7.1
 Requires PHP: 7.4
-Stable tag: 7.7.0
+Stable tag: 7.7.1
 PlugIn URL: https://www.payplus.co.il/wordpress
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
@@ -85,6 +85,18 @@ If you get stuck, you can ask for help in the Plugin Forum. or contact us direct
 8. Save your settings, now you have an active payment page!
 
 == Changelog ==
+
+= 7.7.1 - 30-03-2025 =
+
+- Tweak - Adjusted custom icon (payplus gateway on checkout) sizes for better display.
+- Added - Support for percentage-based coupons.
+- Fix   - Corrected implementation of Partners mode for certain integrations.
+- Tweak - Resolved display issues with PayPlus Embedded.
+- Added - Support for Partner coupons and the option for dual delivery warehouses.
+- Added - Compatibility with the PW Gift Cards Plugin for PayPlus Embedded and Credit Card payments on "Classic Checkout" (PW Gift Cards are not supported in "Blocks Checkout").
+- Tweak - Added an option in Invoice+ settings to choose whether coupons are presented as a discount line or as a product.
+- Fix   - Resolved the "invalid-app-name" issue during Invoice+ document creation by using the payload object instead of deprecated database queries.
+- Fix   - Resolved All POS EMV Invoices came out with "General Product".
 
 = 7.7.0 - 11-03-2025 =
 

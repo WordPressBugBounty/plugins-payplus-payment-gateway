@@ -106,6 +106,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     public $isHostedEnabled;
     public $enableDevMode;
     public $enableDoubleCheckIfPruidExists;
+    protected $pwGiftCardData; // Store gift card data
 
     /**
      *
@@ -1524,6 +1525,13 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $handle = 'payplus_payment_using_token';
         $order = wc_get_order($order_id);
 
+        $payplus_instance = WC_PayPlus::get_instance();
+        $this->pwGiftCardData = $payplus_instance->pwGiftCardData;
+
+        if (isset($this->pwGiftCardData) && $this->pwGiftCardData && is_array($this->pwGiftCardData['gift_cards']) && count($this->pwGiftCardData['gift_cards']) > 0) {
+            WC_PayPlus_Meta_Data::update_meta($order, ['payplus_pw_gift_cards' => wp_json_encode($this->pwGiftCardData)]);
+        }
+
         $objectLogging = new stdClass();
         $objectLogging->keyHandle = 'payplus_payment_using_token';
         $objectLogging->msg = array();
@@ -1639,11 +1647,6 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 }
             }
         }
-
-        // Schedule the custom function to run 2 minutes after process_payment() finishes
-        // if (!wp_next_scheduled('payplus_after_process_payment_event', array($order_id))) {
-        //     wp_schedule_single_event(time() + 120, 'payplus_after_process_payment_event', array($order_id));
-        // }
 
         $result = [
             'result' => 'success',
@@ -2016,9 +2019,6 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     $itemDetails['product_invoice_extra_details'] = str_replace(["'", '"', "\n", "\\"], '', wp_strip_all_tags($metaAll));
                 }
 
-                // $itemDetails['vat_type'] = $item_data->get_tax_status() == 'none' || !$wc_tax_enabled ? 2 : 0;
-                // $itemDetails['vat_type'] = $this->paying_vat_all_order === "yes" ? 0 : $itemDetails['vat_type'];
-
                 $itemDetails['vat_type'] = 0;
 
                 if ($wc_tax_enabled) {
@@ -2051,7 +2051,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         }
 
         // YourMoment Split Shipping
-        if ((isset($options['enable_dev_mode']) && $options['enable_dev_mode'] === "yes") && (WC()->session && WC()->session->has_session())) {
+        if ($this->enableDevMode && (WC()->session && WC()->session->has_session())) {
             $shipping_splitted = WC()->session->get('shipping_splitted');
             // Handle the case where 'shipping_splitted' is null
             if (is_null($shipping_splitted)) {
@@ -2090,54 +2090,11 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 $totalCartAmount += $productPrice;
             }
         }
-        // coupons
 
-        if (!$isAdmin && $order->get_total_discount()) {
-            $productCouponPrice = ($order->get_total_discount());
-            if ($this->rounding_decimals != 0 && $wc_tax_enabled) {
-                $productCouponPrice += $order->get_discount_tax();
-            }
-            $productCouponPrice *= -1;
-            $productCouponPrice = round($productCouponPrice, $this->rounding_decimals);
-            $totalCartAmount += $productCouponPrice;
-
-            $itemDetails = [
-                'name' => ($allProductSku) ? $allProductSku . " ) " : __('Discount coupons', 'payplus-payment-gateway'),
-                'barcode' => __('Discount coupons', 'payplus-payment-gateway'),
-                'quantity' => 1,
-                'price' => round($productCouponPrice, $this->rounding_decimals),
-            ];
-            $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
-        }
-
-        $gift_cards = $order->get_meta('_ywgc_applied_gift_cards');
-        $updated_as_fee = $order->get_meta('ywgc_gift_card_updated_as_fee');
-        $priceGift = 0;
-        $allProductSku = "";
-        if ($gift_cards && $updated_as_fee == false) {
-
-            foreach ($gift_cards as $key => $gift) {
-                $productPrice = -1 * ($gift);
-                $allProductSku .= (empty($allProductSku)) ? " ( " . $key : ' , ' . $key;
-                $priceGift += round($productPrice, $this->rounding_decimals);
-            }
-
-            $itemDetails = [
-                'name' => ($allProductSku) ? $allProductSku . " ) " : __('Discount coupons', 'payplus-payment-gateway'),
-                'barcode' => __('Discount coupons', 'payplus-payment-gateway'),
-                'quantity' => 1,
-                'price' => $priceGift,
-            ];
-            $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
-            $totalCartAmount += $priceGift;
-        }
-
-        if (isset($options['enable_dev_mode']) && $options['enable_dev_mode'] === "yes") {
+        if ($this->enableDevMode) {
             // YourMoment Split Shipping
             if ($shipping_splitted) {
                 $orderTotal = $order->get_total();
-                // Only for admin
-                // if(current_user_can('administrator')) {
                 if ($order->get_total_discount()) {
                     /* 
                     This condition runs when the shipping is splitted and the order has the discount applied.
@@ -2176,6 +2133,66 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 }
             }
             // YourMoment Split Shipping
+        }
+        // coupons
+
+        if (!$isAdmin && $order->get_total_discount()) {
+            $productCouponPrice = ($order->get_total_discount());
+            if ($this->rounding_decimals != 0 && $wc_tax_enabled) {
+                $productCouponPrice += $order->get_discount_tax();
+            }
+            $productCouponPrice *= -1;
+            $productCouponPrice = round($productCouponPrice, $this->rounding_decimals);
+            $totalCartAmount += $productCouponPrice;
+
+            $itemDetails = [
+                'name' => ($allProductSku) ? $allProductSku . " ) " : __('Discount coupons', 'payplus-payment-gateway'),
+                'barcode' => __('Discount coupons', 'payplus-payment-gateway'),
+                'quantity' => 1,
+                'price' => round($productCouponPrice, $this->rounding_decimals),
+            ];
+            $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+        }
+
+        if (isset($this->pwGiftCardData) && isset($this->pwGiftCardData['gift_cards']) && is_array($this->pwGiftCardData['gift_cards'])) {
+            foreach ($this->pwGiftCardData['gift_cards'] as $giftCardId => $giftCard) {
+                $priceGift = 0;
+                $productPrice = -1 * ($giftCard);
+                $allProductSku .= (empty($allProductSku)) ? " ( " . $giftCardId . ")" : ' , ' . $giftCardId;
+                $priceGift += round($productPrice, $this->rounding_decimals);
+
+                $itemDetails = [
+                    'name' => __('PW Gift Card', 'payplus-payment-gateway'),
+                    'barcode' => $giftCardId,
+                    'quantity' => 1,
+                    'price' => $priceGift,
+                ];
+
+                $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+                $totalCartAmount += $priceGift;
+            }
+        }
+
+        $gift_cards = $order->get_meta('_ywgc_applied_gift_cards');
+        $updated_as_fee = $order->get_meta('ywgc_gift_card_updated_as_fee');
+        $priceGift = 0;
+        $allProductSku = "";
+        if ($gift_cards && $updated_as_fee == false) {
+
+            foreach ($gift_cards as $key => $gift) {
+                $productPrice = -1 * ($gift);
+                $allProductSku .= (empty($allProductSku)) ? " ( " . $key : ' , ' . $key;
+                $priceGift += round($productPrice, $this->rounding_decimals);
+            }
+
+            $itemDetails = [
+                'name' => ($allProductSku) ? $allProductSku . " ) " : __('Discount coupons', 'payplus-payment-gateway'),
+                'barcode' => __('Discount coupons', 'payplus-payment-gateway'),
+                'quantity' => 1,
+                'price' => $priceGift,
+            ];
+            $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+            $totalCartAmount += $priceGift;
         }
 
         $totalCartAmount = round($totalCartAmount, $this->rounding_decimals);
@@ -2348,7 +2365,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $json_move_token . '}';
         $payloadArray = json_decode($payload, true);
         $payloadArray['more_info_4'] = PAYPLUS_VERSION;
-        $payload = wp_json_encode($payloadArray);
+        $payload = wp_json_encode($payloadArray, JSON_UNESCAPED_UNICODE);
         return $payload;
     }
 
@@ -3589,27 +3606,6 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         }, $req);
         return $REQUEST;
     }
-
-    // /**
-    //  * @return string|void
-    //  */
-    // public function payplus_ip()
-    // {
-
-    //     foreach (array('HTTP_CLIENT_IP', 'HTTP_X_FORWARDED_FOR', 'HTTP_X_FORWARDED', 'HTTP_X_CLUSTER_CLIENT_IP', 'HTTP_FORWARDED_FOR', 'HTTP_FORWARDED', 'REMOTE_ADDR') as $key) {
-
-    //         if (array_key_exists($key, $_SERVER) === true) {
-
-    //             foreach (explode(',', $_SERVER[$key]) as $ip) {
-
-    //                 if (filter_var($ip, FILTER_VALIDATE_IP) !== false) {
-
-    //                     return $ip;
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
 
     /**
      * @param $handle

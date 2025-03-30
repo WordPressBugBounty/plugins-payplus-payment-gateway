@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.7.1] - 30-03-2025 - (Ippo)
+
+- Tweak - Adjusted custom icons (payplus gateway on checkout) sizes for better display.
+- Added - Support for percentage-based coupons.
+- Fix   - Corrected implementation of Partners mode for certain integrations.
+- Tweak - Resolved display issues with PayPlus Embedded.
+- Added - Support for Partner coupons and the option for dual delivery warehouses.
+- Added - Compatibility with the PW Gift Cards Plugin for PayPlus Embedded and Credit Card payments on "Classic Checkout" (PW Gift Cards are not supported in "Blocks Checkout").
+- Tweak - Added an option in Invoice+ settings to choose whether coupons are presented as a discount line or as a product.
+- Fix   - Resolved the "invalid-app-name" issue during Invoice+ document creation by using the payload object instead of deprecated database queries.
+- Fix   - Resolved All POS EMV Invoices came out with "General Product".
+
 ## [7.7.0] - 11-03-2025 - (Gaara)
 
 - Fix   - Subscription orders with the "Mark as paid" option enabled will now correctly be set to "completed" status upon successful renewal.
