@@ -587,7 +587,7 @@ class WC_PayPlus_Form_Fields
             ],
             'device_uid' => [
                 'title' => __('POS Device UID (If applicable)', 'payplus-payment-gateway'),
-                'type' => 'text',
+                'type' => 'textarea',
                 'description' => __('Your POS Device UID can be found in your PayPlus account', 'payplus-payment-gateway'),
                 'default' => '',
                 'desc_tip' => true,
@@ -615,10 +615,25 @@ class WC_PayPlus_Form_Fields
             ],
             'dev_device_uid' => [
                 'title' => __('Development POS Device UID (If applicable)', 'payplus-payment-gateway'),
-                'type' => 'text',
+                'type' => 'textarea',
                 'description' => __('Your Dev POS Device UID can be found in your PayPlus account', 'payplus-payment-gateway'),
                 'default' => '',
                 'desc_tip' => true,
+            ],
+            'pos_override' => [
+                'title' => __('POS Override', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'label' => __('Override the payment gateway with the payplus EMV POS device (happens after status change)', 'payplus-payment-gateway'),
+                'default' => 'no',
+                'desc_tip' => true,
+                'description' => __('If you have a PayPlus POS device and want to use it for payments with unsupported POS plugins, check this box.', 'payplus-payment-gateway'),
+            ],
+            'pos_override_gateways' => [
+                'title' => __('POS Override Gateways - divide by commas', 'payplus-payment-gateway'),
+                'type' => 'text',
+                'default' => 'pos_card,pos_chip_and_pin',
+                'desc_tip' => true,
+                'description' => __('POS Override Gateways - divide by commas - the payment gateways that will be overridden by the PayPlus EMV POS device.', 'payplus-payment-gateway'),
             ],
             'transaction_type' => [
                 'title' => __('Transactions Type', 'payplus-payment-gateway'),
@@ -756,6 +771,14 @@ class WC_PayPlus_Form_Fields
                 'default' => 'no',
                 'label' => __('Update statuses in ipn response (Default: Unchecked)', 'payplus-payment-gateway'),
                 'description' => __('In ipn response check status (This will run with or without the callback status update)', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+            ],
+            'use_legacy_payload' => [
+                'title' => __('Use legacy payload function', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'default' => 'no',
+                'label' => __('Use legacy payload function (Default: Unchecked)', 'payplus-payment-gateway'),
+                'description' => __('If you are experiencing problems with opening payment pages recently (since the payload refactor) use this.', 'payplus-payment-gateway'),
                 'desc_tip' => true,
             ],
             'order_status_title' => [

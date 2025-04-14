@@ -1084,12 +1084,20 @@ class PayplusInvoice
 
                     $payplusPayload = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_payload');
                     $payPlusPwGiftCards = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_pw_gift_cards');
+
+                    $payplus_instance = WC_PayPlus::get_instance();
+                    $pwGiftCardData = $payplus_instance->pwGiftCardData;
+                    $objectProducts = $this->payplus_get_products_by_order_id($order_id, $dual);
+                    $totalCartAmount = round($objectProducts->amount, $WC_PayPlus_Gateway->rounding_decimals);
+
                     if (!empty($payPlusPwGiftCards) && !empty($payplusPayload)) {
                         $payloadArray = json_decode($payplusPayload, true);
                         $itemsAsJson = [];
                         $totalPWAmount = 0;
+                        isset($payloadArray['products']) ? $payloadArray['items'] = $payloadArray['products'] : null;
                         foreach ($payloadArray['items'] as $key => $item) {
                             if (strpos($item['name'], 'PW Gift Card') !== false) {
+                                $totalCartAmount == 0 ? $item['price'] = 0 : null;
                                 $itemsAsJson['productsItems'][$key]['name'] = $item['name'];
                                 $itemsAsJson['productsItems'][$key]['price'] = $item['price'];
                                 $itemsAsJson['productsItems'][$key]['barcode'] = $item['barcode'];
@@ -1107,12 +1115,34 @@ class PayplusInvoice
                             }
                             $objectProductsPW = (object)$itemsAsJson;
                         }
+                    } elseif (!empty($pwGiftCardData) && is_array($pwGiftCardData) || !empty($payPlusPwGiftCards) && empty($pwGiftCardData)) {
+                        empty($pwGiftCardData) ? $pwGiftCardData = json_decode($payPlusPwGiftCards, true) : null;
+                        $c = 0;
+                        $totalPWAmount = 0;
+                        foreach ($pwGiftCardData['gift_cards'] as $key => $item) {
+                            $itemPrice = $item;
+                            $totalCartAmount == 0 ? $itemsAsJson['productsItems'][$c]['discount_value'] = $itemPrice : null;
+                            $totalCartAmount == 0 ? $itemsAsJson['productsItems'][$c]['discount_type'] = 'amount' : null;
+                            $totalCartAmount == 0 ? $itemsAsJson['productsItems'][$c]['price'] = $itemPrice : $itemsAsJson['productsItems'][$c]['price'] = -$itemPrice;;
+                            $itemsAsJson['productsItems'][$c]['name'] = "PW Gift Card";
+                            $itemsAsJson['productsItems'][$c]['barcode'] = $key;
+                            $itemsAsJson['productsItems'][$c]['quantity'] = 1;
+                            $itemsAsJson['productsItems'][$c]['vat_type_code'] = 0;
+
+                            $itemsAsJson['productsItems'][$c]['vat_type_code'] === 0 ? $itemsAsJson['productsItems'][$c]['vat_type_code'] = 'vat-type-included' : $itemsAsJson['productsItems'][$c]['vat_type_code'] = 'vat-type-exempt';
+                            if ($itemsAsJson['productsItems'][$c]['vat_type_code'] === null) {
+                                $itemsAsJson['productsItems'][$c]['vat_type_code'] = 0;
+                            }
+                            $totalPWAmount += -$item;
+                            ++$c;
+                        }
+                        $objectProductsPW = (object)$itemsAsJson;
                     }
 
-                    $objectProducts = $this->payplus_get_products_by_order_id($order_id, $dual);
                     if (isset($objectProductsPW)) {
                         $objectProducts = (object) array_merge_recursive((array) $objectProducts, (array) $objectProductsPW);
                         $objectProducts->amount += $totalPWAmount;
+                        $objectProducts->amount < 0 ? $objectProducts->amount = 0 : null;
                     }
 
                     $totalCartAmount = round($objectProducts->amount, $WC_PayPlus_Gateway->rounding_decimals);
@@ -1191,9 +1221,10 @@ class PayplusInvoice
                     $payplusApprovalNum = ($payplusApprovalNum) ? $payplusApprovalNum : $payplusApprovalNumPaypl;
                     $payload = array_merge($payload, $this->payplus_get_payments_invoice($resultApps, $payplusApprovalNum, $dual, $order->get_total()));
 
+                    $ppResJson = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response');
+                    $payPlusResponse = !empty($ppResJson) ? json_decode($ppResJson, true) : null;
+
                     if (isset($payload['payments'][0]['payment_app']) && $payload['payments'][0]['payment_app'] === "-1") {
-                        $ppResJson = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response');
-                        $payPlusResponse = !empty($ppResJson) ? json_decode($ppResJson, true) : null;
                         if (is_array($payPlusResponse)) {
                             $payments = [];
                             $numberOfPayments = isset($payPlusResponse['transaction']['payments']['number_of_payments']) ? $payPlusResponse['transaction']['payments']['number_of_payments'] : $payPlusResponse['number_of_payments'] ?? 1;
@@ -1205,6 +1236,13 @@ class PayplusInvoice
                             }
                             $payload['payments'] = $payments;
                         }
+                    }
+
+                    if (is_array($payPlusResponse)) {
+                        isset($payPlusResponse['number_of_payments']) && $payPlusResponse['number_of_payments'] > 1 ? $payload['payments'][0]['payments'] = $payPlusResponse['number_of_payments'] : null;
+                        isset($payPlusResponse['number_of_payments']) && $payPlusResponse['number_of_payments'] > 1 ? $payload['payments'][0]['transaction_type'] = 'payments' : 'normal';
+                        isset($payPlusResponse['first_payment_amount']) ? $payload['payments'][0]['first_payment'] = $payPlusResponse['first_payment_amount'] : null;
+                        isset($payPlusResponse['rest_payments_amount']) ? $payload['payments'][0]['subsequent_payments'] = $payPlusResponse['rest_payments_amount'] : null;
                     }
 
                     if ($j5Amount) {

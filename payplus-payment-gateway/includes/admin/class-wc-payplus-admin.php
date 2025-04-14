@@ -35,6 +35,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
     private $_wpnonce;
     public $api_test_mode;
     public $showGetPayPlusDataButton;
+    public $pwGiftCardData;
 
     /**
      * @return null
@@ -57,7 +58,6 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         }
         global $pagenow;
         $postKey = array_key_exists('post', $_GET) ? 'post' : 'id';
-
         $isPageOrder = ('post.php' === $pagenow || 'admin.php' === $pagenow) && isset($_GET[$postKey]) &&
             ('shop_order' === get_post_type(sanitize_text_field(wp_unslash($_GET[$postKey])))
                 || 'shop_subscription' === get_post_type(sanitize_text_field(wp_unslash($_GET[$postKey])))
@@ -184,7 +184,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         $user_id = $order->get_user_id();
         $token = isset($_POST['token']) ? sanitize_text_field(wp_unslash($_POST['token'])) : null;
 
-        $payload = $this->generatePayloadLink($order_id, true, $token);
+        $payload = $this->generatePaymentLink($order_id, true, $token);
         WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload' => $payload]);
         $order->set_payment_method('payplus-payment-gateway');
         $order->set_payment_method_title('Pay with Debit or Credit Card');
@@ -897,19 +897,42 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
         wp_die();
     }
 
-    /**
-     * @return void
-     */
-    public function ajax_payplus_generate_link_payment()
+    public function deleteMetaData($order_id, $metaKey)
     {
-        check_ajax_referer('payplus_generate_link_payment', '_ajax_nonce');
+        $order = wc_get_order($order_id);
+        if ($order) {
+            $order->delete_meta_data($metaKey); // Replace 'meta_key_to_delete' with the actual meta key
+            $order->save(); // Save the order to persist the changes
+        }
+    }
 
-        if (!current_user_can('edit_shop_orders')) {
-            wp_send_json_error('You do not have permission to edit orders.');
-            wp_die();
+    public function displayMetaData($order_id, $metaKey)
+    {
+        $order = wc_get_order($order_id);
+        if ($order) {
+            $metaData = $order->get_meta_data(); // Replace 'meta_key_to_delete' with the actual meta key
+            echo wp_json_encode($metaData); // Display the meta data
+            exit;
+        }
+    }
+
+    /**
+     * @return void|string
+     */
+    public function ajax_payplus_generate_link_payment($oid = null, $_wpnonce = null)
+    {
+        if (isset($_wpnonce) && !wp_verify_nonce($_wpnonce, 'ajax_payplus_generate_link_payment')) {
+            check_ajax_referer('payplus_generate_link_payment', '_ajax_nonce');
+            if (!current_user_can('edit_shop_orders')) {
+                wp_send_json_error('You do not have permission to edit orders.');
+                wp_die();
+            }
         }
 
         $response = array("payment_response" => "", "status" => false);
+        isset($oid) && is_int($oid) ? $_POST['order_id'] = $oid : null;
+        isset($oid) && is_int($oid) ? $_POST['button'] = "payment-payplus-dashboard-emv" : null;
+        isset($oid) && is_int($oid) ? $isPosAction = true : $isPosAction = false;
 
         if (!empty($_POST)) {
             $this->isInitiated();
@@ -921,12 +944,45 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
             $order->set_payment_method('payplus-payment-gateway');
             $order->set_payment_method_title('Pay with Debit or Credit Card');
             $this->payplus_add_log_all($handle, 'New Payment Process Fired (' . $order_id . ')');
-            $payload = $this->generatePayloadLink($order_id, true);
+            $payload = $this->generatePaymentLink($order_id, true);
+            $payplus_instance = WC_PayPlus::get_instance();
+            $this->pwGiftCardData = $payplus_instance->pwGiftCardData;
+
+            if (isset($this->pwGiftCardData) && $this->pwGiftCardData && is_array($this->pwGiftCardData['gift_cards']) && count($this->pwGiftCardData['gift_cards']) > 0) {
+                WC_PayPlus_Meta_Data::update_meta($order, ['payplus_pw_gift_cards' => wp_json_encode($this->pwGiftCardData)]);
+            }
+            if (isset($this->pwGiftCardData) && $this->pwGiftCardData && is_array($this->pwGiftCardData['gift_cards'])) {
+                $products = [];
+                $totalGiftCards = 0;
+                foreach ($this->pwGiftCardData['gift_cards'] as $giftCardId => $giftCard) {
+                    $priceGift = 0;
+                    $productPrice = -1 * ($giftCard);
+                    $priceGift += floatval(number_format($productPrice, 2, '.', ''));
+
+                    $giftCards = [
+                        'name' => __('PW Gift Card', 'payplus-payment-gateway'),
+                        'barcode' => $giftCardId,
+                        'quantity' => 1,
+                        'price' => $priceGift,
+                    ];
+
+                    $products[] = $giftCards;
+                    $totalGiftCards += $priceGift;
+                }
+            }
             $deviceTransaction = isset($_POST['button']) && $_POST['button'] === "payment-payplus-dashboard-emv" ? true : false;
             if ($deviceTransaction) {
+                $order->set_payment_method_title('Pay with Debit or Credit Card Via POS EMV');
                 $payload = json_decode($payload, true);
                 $payload['credit_terms'] = 1;
+                if (isset($products) && is_array($products) && count($products) > 0) {
+                    $payload['items'] = array_merge($payload['items'], $products);
+                    $payload['amount'] += $totalGiftCards;
+                }
+                $payload['amount'] = floatval(number_format($payload['amount'], 2, '.', ''));
                 $payload['products'] = $payload['items'];
+                $payload['extra_info'] = $order_id;
+                $payload['more_info'] = $order_id;
                 unset($payload['items']);
                 $payload['device_uid'] = $this->device_uid;
                 $chargeMethod = $payload['charge_method'];
@@ -944,6 +1000,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                 $res = json_decode(wp_remote_retrieve_body($response));
                 if ($deviceTransaction) {
                     if ($res->results->status === "success" && $res->results->code === 0) {
+                        $type = $chargeMethod === 1 ? "Charge" : "Approval";
                         WC_PayPlus_Meta_Data::update_meta($order, [
                             'payplus_response' => wp_json_encode($res),
                             'payplus_response_emv' => wp_json_encode($res->data->transaction),
@@ -951,9 +1008,16 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                             'payplus_method' => 'credit-card',
                             'payplus_four_digits' => $res->data->data->card_information->four_digits,
                             'payplus_brand_name' => $res->data->data->card_information->brand_name,
+                            'payplus_type' => $type,
                         ]);
-                        $type = $chargeMethod === 1 ? "Charge" : "Approval";
                         $this->updateOrderStatus($order_id, $type, $res = null);
+                        if ($isPosAction) {
+                            return "success";
+                        }
+                    } else {
+                        if ($isPosAction) {
+                            return "error";
+                        }
                     }
                 } else {
                     if (isset($res->data->payment_page_link) && $this->validateUrl($res->data->payment_page_link)) {
@@ -970,7 +1034,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
                 }
             }
         }
-        echo wp_json_encode($response);
+        echo wp_json_encode($response, JSON_UNESCAPED_UNICODE);
         wp_die();
     }
     /**
@@ -1229,7 +1293,7 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
 
             $installed_payment_methods = array_map('get_payment_payplus', array_keys($installed_payment_methods), array_values($installed_payment_methods));
             $installed_payment_methods = array_filter($installed_payment_methods, function ($value) {
-                return $value != '' && $value != null && $value != 'hostedFields';
+                return $value != '' && $value != null && $value != 'hostedFields' && $value != 'posEmv';
             });
 
             $installed_payment_methods[] = 'pay-box';
@@ -2329,6 +2393,22 @@ class WC_PayPlus_Admin_Payments extends WC_PayPlus_Gateway
 
         if (isset($_GET['post']) && isset($_GET['action']) && $_GET['action'] === 'edit') {
             $order_id = intval($_GET['post']);
+        }
+
+        if (!isset($order_id)) {
+            if (isset($_GET['id']) && $_GET['id'] !== "") {
+                $order_id = intval($_GET['id']);
+            }
+        }
+
+        if (isset($_GET['deleteMetaData']) && $_GET['deleteMetaData'] !== "") {
+            $metaKey = sanitize_text_field(wp_unslash($_GET['deleteMetaData']));
+            $this->deleteMetaData($order_id, $metaKey);
+        }
+
+        if (isset($_GET['displayMetaData']) && $_GET['displayMetaData'] !== "") {
+            $metaKey = sanitize_text_field(wp_unslash($_GET['displayMetaData']));
+            $this->displayMetaData($order_id, $metaKey);
         }
 
         if (!empty($order_id)) {

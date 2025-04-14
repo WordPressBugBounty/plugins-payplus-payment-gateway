@@ -4,8 +4,8 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.7.1
- * Tested up to: 6.7.1
+ * Version: 7.7.2
+ * Tested up to: 6.8
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
  * Requires PHP: 7.4
@@ -19,7 +19,7 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.7.1');
+define('PAYPLUS_VERSION', '7.7.2');
 define('PAYPLUS_VERSION_DB', 'payplus_6_3');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
@@ -803,10 +803,14 @@ class WC_PayPlus
                         if (boolval($this->hostedFieldsOptions['enabled'] === "yes") && !$isSubscriptionOrder) {
                             $this->isHostedInitiated();
                         }
+                        if (boolval($this->hostedFieldsOptions['enabled'] === "yes") && $isSubscriptionOrder && get_current_user_id() !== 0) {
+                            $this->isHostedInitiated();
+                        }
                     }
                 }
 
                 $this->is_block_based_checkout() && boolval($this->hostedFieldsOptions['enabled'] === "yes") && !$isSubscriptionOrder ? $this->isHostedInitiated() : null;
+                $this->is_block_based_checkout() && boolval($this->hostedFieldsOptions['enabled'] === "yes") && $isSubscriptionOrder && get_current_user_id() !== 0 ? $this->isHostedInitiated() : null;
 
                 $isElementor = in_array('elementor/elementor.php', apply_filters('active_plugins', get_option('active_plugins')));
                 $isEnableOneClick = (isset($this->payplus_payment_gateway_settings->enable_google_pay) && $this->payplus_payment_gateway_settings->enable_google_pay === "yes") ||
@@ -1212,6 +1216,7 @@ class WC_PayPlus
                 $methods[] = 'WC_PayPlus_Gateway_Valuecard';
                 $methods[] = 'WC_PayPlus_Gateway_FinitiOne';
                 $methods[] = 'WC_PayPlus_Gateway_HostedFields';
+                $methods[] = 'WC_PayPlus_Gateway_POS_EMV';
                 $payplus_payment_gateway_settings = get_option('woocommerce_payplus-payment-gateway_settings');
                 if ($payplus_payment_gateway_settings) {
                     if (isset($payplus_payment_gateway_settings['disable_menu_header']) && $payplus_payment_gateway_settings['disable_menu_header'] !== "yes") {
@@ -1349,6 +1354,7 @@ class WC_PayPlus
                             $payment_method_registry->register(new WC_Gateway_Payplus_Valuecard_Block());
                             $payment_method_registry->register(new WC_Gateway_Payplus_FinitiOne_Block());
                             $payment_method_registry->register(new WC_PayPlus_Gateway_HostedFields_Block());
+                            $payment_method_registry->register(new WC_PayPlus_Gateway_POS_EMV_Block());
                             $payment_method_registry->register(new WC_Gateway_Payplus_Paypal_Block());
                         }
                     );

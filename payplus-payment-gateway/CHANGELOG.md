@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.7.2] - 14-04-2025 - (LifeLine)
+
+- Fix   - Resolved an issue where POS EMV refunds were not processing as expected.
+- Tweak - Improved the payment payload generation function while ensuring compatibility with legacy systems.
+- Fix   - Addressed a problem where Invoice+ documents displayed incorrect details and amounts when Coupons and PW Gift Cards were used together in a transaction, including cases with zero-amount payment invoices.
+- Tweak - Enabled support for generating Invoice+ documents for PW Gift Cards at a later time.
+- Added - Support for subscriptions in PayPlus Embedded for logged-in users.
+- Tweak - The close iframe button in blocks checkout now consistently appears in black.
+- Tweak - Initial refactor of the generatePayloadLink function, now renamed to generatePaymentLink. Both the new and "legacy" payloads are supported. If issues arise with the new payload, you can revert to the "legacy" payload by enabling the "Use legacy payload function" checkbox in the plugin settings.
+- Added - Feature: Pay with POS EMV as a subgateway from the checkout page.
+- Added - Payment details are now included in Invoice+ documents.
+- Tweak - Verified compatibility with WordPress version 6.8.
+- Fix   - Resolved an issue with new checkout blocks where "PayPlus Embedded" was unnecessarily hidden based on tokens.
+- Tweak - Updated translations for recently added plugin settings.
+
 ## [7.7.1] - 30-03-2025 - (Ippo)
 
 - Tweak - Adjusted custom icons (payplus gateway on checkout) sizes for better display.
@@ -12,7 +27,7 @@ All notable changes to this project will be documented in this file.
 - Added - Compatibility with the PW Gift Cards Plugin for PayPlus Embedded and Credit Card payments on "Classic Checkout" (PW Gift Cards are not supported in "Blocks Checkout").
 - Tweak - Added an option in Invoice+ settings to choose whether coupons are presented as a discount line or as a product.
 - Fix   - Resolved the "invalid-app-name" issue during Invoice+ document creation by using the payload object instead of deprecated database queries.
-- Fix   - Resolved All POS EMV Invoices came out with "General Product".
+- Fix   - Resolved all POS EMV Invoices came out with "General Product".
 
 ## [7.7.0] - 11-03-2025 - (Gaara)
 

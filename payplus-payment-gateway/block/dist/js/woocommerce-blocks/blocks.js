@@ -48,6 +48,10 @@ if (isCheckout || hasOrder) {
     ? ["payplus-payment-gateway"]
     : gateways;
 
+  gateways = payPlusGateWay.isSubscriptionOrder && payPlusGateWay.isLoggedIn
+    ? ["payplus-payment-gateway", "payplus-payment-gateway-hostedfields"]
+    : gateways;
+
   let customIcons = [];
 
   const w = window.React;
@@ -73,7 +77,7 @@ if (isCheckout || hasOrder) {
   let isCustomeIcons = !!payPlusGateWay.customIcons[0]?.length;
   const hasSavedTokens = Object.keys(payPlusGateWay.hasSavedTokens).length > 0;
   const hideMainPayPlusGateway =
-    payPlusGateWay.hideMainPayPlusGateway && hasSavedTokens;
+    payPlusGateWay.hideMainPayPlusGateway;
 
   (() => {
     ("use strict");
@@ -119,6 +123,7 @@ if (isCheckout || hasOrder) {
                   fontSize: "20px",
                   right: "0px",
                   border: "none",
+                  color: "black",
                   backgroundColor: "transparent",
                   display: "none",
                 },
@@ -219,12 +224,22 @@ if (isCheckout || hasOrder) {
       );
 
       const observer = new MutationObserver((mutationsList, observer) => {
+        const activePaymentMethod = payment.getActivePaymentMethod();
+        if (
+          activePaymentMethod.search(
+            "payplus-payment-gateway-hostedfields"
+          ) === 0
+        ) {
+          const ppIframeElement = document.getElementsByClassName("pp_iframe_h")[0];
+          if (ppIframeElement) {
+            ppIframeElement.style.display = "flex";
+          }
+        }
         if (hideMainPayPlusGateway) {
           const parentDiv = document
             .querySelector(
               "#radio-control-wc-payment-method-options-payplus-payment-gateway"
-            )
-            .closest(".wc-block-components-radio-control-accordion-option");
+            )?.closest(".wc-block-components-radio-control-accordion-option");
           if (parentDiv) {
             parentDiv.style.display = "none";
           }
@@ -284,8 +299,6 @@ if (isCheckout || hasOrder) {
         }
         if (store.isComplete()) {
           observer.disconnect();
-          const activePaymentMethod = payment.getActivePaymentMethod();
-
           if (
             activePaymentMethod.search(
               "payplus-payment-gateway-hostedfields"
@@ -312,7 +325,7 @@ if (isCheckout || hasOrder) {
             return;
           }
 
-          if (activePaymentMethod.search("payplus-payment-gateway") === 0) {
+          if (activePaymentMethod.search("payplus-payment-gateway") === 0 && activePaymentMethod.search("payplus-payment-gateway-pos-emv") !== 0) {
             const gateWaySettings =
               window.wc.wcSettings.getPaymentMethodData(activePaymentMethod)[
               activePaymentMethod + "-settings"

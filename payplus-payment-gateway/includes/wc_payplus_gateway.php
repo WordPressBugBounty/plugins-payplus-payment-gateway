@@ -107,6 +107,9 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     public $enableDevMode;
     public $enableDoubleCheckIfPruidExists;
     protected $pwGiftCardData; // Store gift card data
+    public $useLegacyPayload;
+    public $isPosOverrideGateways;
+    public $posOverrideGateways;
 
     /**
      *
@@ -151,7 +154,10 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->block_ip_transactions_hour = $this->get_option('block_ip_transactions_hour');
         $this->api_key = $this->api_test_mode ? $this->get_option('dev_api_key') ?? null : $this->get_option('api_key');
         $this->secret_key = $this->api_test_mode ? $this->get_option('dev_secret_key') ?? null : $this->get_option('secret_key');
+        $this->isPosOverrideGateways = $this->get_option('pos_override') == 'yes' ? true : false;
+        $this->posOverrideGateways = $this->get_option('pos_override_gateways');
         $this->device_uid = $this->api_test_mode ? $this->get_option('dev_device_uid') ?? null : $this->get_option('device_uid');
+        $this->device_uid = $this->getPayPlusDeviceId($this->device_uid);
         $this->payment_page_id = $this->api_test_mode ? $this->get_option('dev_payment_page_id') ?? null : $this->get_option('payment_page_id');
         $this->current_time = wp_date('Y-m-d H:i:s', current_time('timestamp'), new DateTimeZone('Asia/Jerusalem'));
         $this->rounding_decimals = ROUNDING_DECIMALS;
@@ -159,6 +165,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->hostedFieldsOptions = get_option('woocommerce_payplus-payment-gateway-hostedfields_settings');
         $this->isHostedEnabled = boolval(isset($this->hostedFieldsOptions['enabled']) && $this->hostedFieldsOptions['enabled'] === "yes");
         $this->enableDoubleCheckIfPruidExists = $this->get_option('enable_double_check_if_pruid_exists') == 'yes' ? true : false;
+        $this->useLegacyPayload = $this->get_option('use_legacy_payload') == 'yes' ? true : false;
 
         if (wc_get_price_decimals() < ROUNDING_DECIMALS) {
             $this->rounding_decimals = wc_get_price_decimals();
@@ -270,6 +277,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
         // Hook the custom function to the scheduled event
         add_action('payplus_after_process_payment_event', array($this, 'payplus_after_process_payment_function'));
+        add_action('woocommerce_checkout_order_processed', [$this, 'pwGiftCardsOnNoPayment'], 10, 3);
+        $this->isPosOverrideGateways ? add_action('woocommerce_order_status_changed', [$this, 'payplusCheckPaymentGatewayId'], 10, 1) : null;
 
         /****** ACTION END ******/
 
@@ -297,6 +306,63 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $payplus_invoice_option['payplus_invoice_api_key'] = $this->api_key;
             $payplus_invoice_option['payplus_invoice_secret_key'] = $this->secret_key;
             update_option('payplus_invoice_option', $payplus_invoice_option);
+        }
+    }
+
+    public function getPayPlusDeviceId($deviceUid)
+    {
+        $cStoreId = get_current_user_id();
+        if (strlen($deviceUid) > 0 && isset($cStoreId)) {
+            $currentDevice = $this->device_uid;
+            if (strpos($deviceUid, ',') !== false) {
+                $devices = explode(',', $deviceUid);
+
+                foreach ($devices as $device) {
+                    list($storeId, $deviceId) = explode(':', $device);
+                    if ($cStoreId == $storeId) {
+                        $currentDevice = $deviceId;
+                        break;
+                    }
+                }
+            }
+            $this->device_uid = $currentDevice;
+        }
+        return $this->device_uid;
+    }
+
+    public function payplusCheckPaymentGatewayId($order_id)
+    {
+        $order = wc_get_order($order_id);
+
+        // Get the payment gateway ID
+        $payment_gateway_id = $order->get_payment_method();
+        $WC_PayPlus_Admin_Payments = new WC_PayPlus_Admin_Payments;
+        $gatewaysToOverride = !empty($this->posOverrideGateways) ? explode(',', $this->posOverrideGateways) : [];
+        // Check if the payment gateway ID matches your target ID
+        if (is_array($gatewaysToOverride) && in_array($payment_gateway_id, $gatewaysToOverride)) {
+            $_wpnonce = wp_create_nonce('ajax_payplus_generate_link_payment');
+            $emvResponse = $WC_PayPlus_Admin_Payments->ajax_payplus_generate_link_payment($order_id, $_wpnonce);
+            if ($emvResponse === "error") {
+                $order->update_status('wc-pending', __('Payment pending.', 'payplus-payment-gateway'));
+                $order->save();
+            }
+        }
+    }
+
+    public function pwGiftCardsOnNoPayment($order_id, $posted_data, $order)
+    {
+        // Check if the order total is 0
+        if ($order->get_total() == 0) {
+            $payplus_instance = WC_PayPlus::get_instance();
+            $this->pwGiftCardData = $payplus_instance->pwGiftCardData;
+
+            if (isset($this->pwGiftCardData) && $this->pwGiftCardData && is_array($this->pwGiftCardData['gift_cards']) && count($this->pwGiftCardData['gift_cards']) > 0) {
+                WC_PayPlus_Meta_Data::update_meta($order, ['payplus_pw_gift_cards' => wp_json_encode($this->pwGiftCardData)]);
+            }
+
+            // Add custom meta data
+            $order->update_meta_data('_custom_meta_key', 'Custom meta value for zero total orders');
+            $order->save();
         }
     }
 
@@ -612,7 +678,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             'tavzahav' => 'woocommerce_payplus-payment-gateway-tavzahav_settings',
             'valuecard' => 'woocommerce_payplus-payment-gateway-valuecard_settings',
             'finitone' => 'woocommerce_payplus-payment-gateway-finitione_settings',
-            'hostedFields' => 'woocommerce_payplus-payment-gateway-hostedfields_settings'
+            'hostedFields' => 'woocommerce_payplus-payment-gateway-hostedfields_settings',
+            'posEmv' => 'woocommerce_payplus-payment-gateway-pos-emv_settings'
         ];
 
         // Get the raw POST body
@@ -2226,7 +2293,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
      * @param $custom_more_info
      * @return string
      */
-    public function generatePayloadLink($order_id, $isAdmin = false, $token = null, $subscription = false, $custom_more_info = '', $move_token = false, $options = [])
+    public function generatePaymentLink($order_id, $isAdmin = false, $token = null, $subscription = false, $custom_more_info = '', $move_token = false, $options = [])
     {
         $order = wc_get_order($order_id);
         $langCode = explode("_", get_locale());
@@ -2239,7 +2306,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $objectProducts = $this->payplus_get_products_by_order_id($order_id);
         }
 
-        $customer = (count($customer)) ? '"customer":' . wp_json_encode($customer) . "," : "";
+        $Customer = (count($customer)) ? '"customer":' . wp_json_encode($customer) . "," : "";
+        $payloadCustomer = count($customer) ? $customer : "";
         $returnUrl = add_query_arg('wc-api', 'payplus_gateway', $this->get_return_url($order));
         $redirectSuccess = ($isAdmin) ? $this->response_url . "&paymentPayPlusDashboard=" . $this->payplus_generate_key_dashboard . "&_wpnonce=" . wp_create_nonce('payload_link') : $this->response_url . "&success_order_id=$order_id&_wpnonce=" . wp_create_nonce('payload_link');
         $setInvoice = '';
@@ -2248,49 +2316,62 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $addChargeLine = '';
         if ($subscription) {
             $addChargeLine = '"charge_method": 1,';
+            $chargeMethod = 1;
         } else if ($this->settings['transaction_type'] != "0") {
             $addChargeLine = '"charge_method": ' . $this->settings['transaction_type'] . ',';
+            $chargeMethod = intval($this->settings['transaction_type']);
         }
         if (!$subscription && $this->add_product_field_transaction_type) {
             if ($this->payplus_check_all_product($order, "2")) {
                 $addChargeLine = '"charge_method": 2,';
+                $chargeMethod = 2;
             } elseif ($this->payplus_check_all_product($order, "1")) {
                 $addChargeLine = '"charge_method": 1,';
+                $chargeMethod = 1;
             }
         }
 
         if ($this->invoice_api->payplus_get_invoice_enable()) {
             $flagInvoice = 'false';
             $setInvoice = '"initial_invoice": ' . $flagInvoice . ',';
+            $initialInvoice = false;
         } elseif ($this->initial_invoice == "1") {
             $flagInvoice = 'true';
             $setInvoice = '"initial_invoice": ' . $flagInvoice . ',';
+            $initialInvoice = true;
         } elseif ($this->initial_invoice == "2") {
             $flagInvoice = 'false';
             $setInvoice = '"initial_invoice": ' . $flagInvoice . ',';
+            $initialInvoice = false;
         }
         if ($this->paying_vat_all_order == "yes") {
             $payingVat = '"paying_vat": true,';
+            $paying_vat = true;
         }
         // Paying Vat & Invoices
         if ($this->paying_vat == "0") {
             $payingVat = '"paying_vat": true,';
+            $paying_vat = true;
         } else if ($this->paying_vat == "1") {
             $payingVat = '"paying_vat": false,';
+            $paying_vat = false;
         } else if ($this->paying_vat == "2") {
             if (trim(strtolower($customer_country_iso)) != trim(strtolower($this->paying_vat_iso_code))) {
                 $payingVat = '"paying_vat": false,';
+                $paying_vat = false;
                 if (!empty($this->foreign_invoices_lang)) {
                     $invoiceLanguage = '"invoice_language": "' . strtolower($this->foreign_invoices_lang) . '",';
+                    $invoiceLang = strtolower($this->foreign_invoices_lang);
                 }
             } else {
                 $payingVat = '"paying_vat": true,';
+                $paying_vat = true;
             }
         }
         if ($this->change_vat_in_eilat) {
-
             if ($this->payplus_check_is_vat_eilat($order_id)) {
                 $payingVat = '"paying_vat": false,';
+                $paying_vat = false;
             }
         }
 
@@ -2328,12 +2409,46 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $json_move_token = "";
         if ($move_token) {
             $json_move_token = ',"move_token": true';
+            $moveToken = true;
         }
 
         $totalCartAmount = $objectProducts->amount;
         $secure3d = (isset($token) && $token !== null) ? '"secure3d": {"activate":false},' : "";
+        $secure3D = isset($token) && $token !== null ? ["activate" => false] : "";
+        $tokenPayload = $token ? (is_object($token) ? $token->get_token() : $token) : "";
+        $hidePaymentFields = $this->hide_payments_field > 0 ? ($this->hide_payments_field == 1 ? true : false) : "";
+        $addData = $this->send_add_data ? $order_id : "";
 
-        $payload = '{
+        $payload['payment_page_uid'] = $this->payment_page_id;
+        $payload['charge_method'] = $chargeMethod;
+        $payload['expiry_datetime'] = "30";
+        $payload['hide_other_charge_methods'] = $hideOtherChargeMethods === 'true' ? true : false;
+        $payload['language_code'] = trim(strtolower($langCode[0]));
+        $payload['refURL_success'] = $redirectSuccess . '&charge_method=' . $this->default_charge_method;
+        $payload['refURL_failure'] = $this->response_error_url;
+        $payload['refURL_callback'] = $callback;
+        $payload['charge_default'] = $this->default_charge_method;
+        $payload['paying_vat'] = $paying_vat;
+        $payload['customer'] = $payloadCustomer;
+        !$this->send_products ? $payload['items'] = array_map('json_decode', $objectProducts->productsItems) : null;
+        !empty($tokenPayload) ? $payload['token'] = $tokenPayload : null;
+        !empty($secure3D) ? $payload['secure3d'] = $secure3D : null;
+        !$this->send_products ? $payload['amount'] = $totalCartAmount : $payload['amount'] = $totallCart;
+        $payload['currency_code'] = $order->get_currency();
+        $payload['sendEmailApproval'] = $this->sendEmailApproval == 1 ? true : false;
+        $payload['sendEmailFailure'] = $this->sendEmailFailure == 1 ? true : false;
+        $payload['create_token'] = $bSaveToken ? true : false;
+        isset($initialInvoice) ? $payload['initial_invoice'] = $initialInvoice : null;
+        isset($invoiceLang) ? $payload['invoice_language'] = $invoiceLang : null;
+        !empty($external_recurring_payment) ? $payload['external_recurring_payment'] = json_decode($this->getRecurring($external_recurring_id, $order_id), true) : null;
+        !empty($addData) ? $payload['add_data'] = (string) $addData : null;
+        $this->hide_payments_field > 0 ? $payload['hide_payments_field'] = $hidePaymentFields : null;
+        $this->hide_identification_id > 0 ? $payload['hide_identification_id'] = ($this->hide_identification_id == 1 ? true : false) : null;
+        $payload['more_info'] = $custom_more_info ? (string)$custom_more_info : (string)$order_id;
+        $move_token ? $payload['move_token'] = true : null;
+        $payload['more_info_4'] = PAYPLUS_VERSION;
+
+        $legacyPayload = '{
             "payment_page_uid": "' . $this->payment_page_id . '",
             ' . $addChargeLine . '
             "expiry_datetime": "30",
@@ -2343,7 +2458,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             "refURL_failure": "' . $this->response_error_url . '",
             "refURL_callback": "' . $callback . '",
             "charge_default":"' . $this->default_charge_method . '",
-            ' . $payingVat . $customer
+            ' . $payingVat . $Customer
             . (!$this->send_products ? '
             "items": [
                 ' . implode(",", $objectProducts->productsItems) . '
@@ -2363,9 +2478,13 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             ' . ($this->hide_identification_id > 0 ? '"hide_identification_id": ' . ($this->hide_identification_id == 1 ? 'true' : 'false') . ',' : '') . '
             "more_info": "' . ($custom_more_info ? $custom_more_info : $order_id) . '"' .
             $json_move_token . '}';
-        $payloadArray = json_decode($payload, true);
+        $payloadArray = json_decode($legacyPayload, true);
         $payloadArray['more_info_4'] = PAYPLUS_VERSION;
-        $payload = wp_json_encode($payloadArray, JSON_UNESCAPED_UNICODE);
+
+        $this->payplus_add_log_all("generate_payment_link_refactor_log", "New payload: \n" . wp_json_encode($payload) . "\n");
+        $this->payplus_add_log_all("generate_payment_link_refactor_log", "Legacy payload: \n" . wp_json_encode($payloadArray) . "\n");
+
+        $this->useLegacyPayload ? $payload = wp_json_encode($payloadArray) : $payload = wp_json_encode($payload);
         return $payload;
     }
 
@@ -2444,7 +2563,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
 
         $options = $isSubscriptionOrder ? ['isSubscriptionOrder' => true] : [];
-        $payload = $this->generatePayloadLink($order_id, false, $token, $subscription, $custom_more_info, $move_token, $options);
+        $payload = $this->generatePaymentLink($order_id, false, $token, $subscription, $custom_more_info, $move_token, $options);
         WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload' => $payload]);
         $this->payplus_add_log_all($handle, 'Payload data before Sending to PayPlus');
         $this->payplus_add_log_all($handle, wp_json_encode($payload), 'payload');
