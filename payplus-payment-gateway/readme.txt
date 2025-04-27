@@ -4,7 +4,7 @@ Tags: Woocommerce Payment Gateway, Credit Cards, Charges and Refunds, Subscripti
 Requires at least: 3.0.1
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 7.7.2
+Stable tag: 7.7.3
 PlugIn URL: https://www.payplus.co.il/wordpress
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
@@ -86,6 +86,16 @@ If you get stuck, you can ask for help in the Plugin Forum. or contact us direct
 
 == Changelog ==
 
+= 7.7.3 - 27-04-2025 =
+
+- Tweak - Express Checkout now displays specific coupon names instead of a generic "discount" label (when applicable).
+- Tweak - Enhanced security through updated nonce implementation.
+- Added - Option to hide the main PayPlus gateway on the classic checkout page (useful for merchants primarily using POS EMV).
+- Added - Setting to prevent automatic Invoice+ document creation for other POS gateways transactions (when using POS Override).
+- Added - EMV POS payment option is now hidden during standard customer checkout even when activated.
+- Added - Support for including the "Brand" field in EMV POS documents.
+- Tweak - Improved error handling for EMV POS transactions.
+
 = 7.7.2 - 14-04-2025 =
 
 - Fix   - Resolved an issue where POS EMV refunds were not processing as expected.
@@ -96,7 +106,7 @@ If you get stuck, you can ask for help in the Plugin Forum. or contact us direct
 - Tweak - The close iframe button in blocks checkout now consistently appears in black.
 - Tweak - Initial refactor of the generatePayloadLink function, now renamed to generatePaymentLink. Both the new and "legacy" payloads are supported. If issues arise with the new payload, you can revert to the "legacy" payload by enabling the "Use legacy payload function" checkbox in the plugin settings.
 - Added - Feature: Pay with POS EMV as a subgateway from the checkout page.
-- Added - Payment details are now included in Invoice+ documents.
+- Added - Multiple payments details are now included in Invoice+ documents.
 - Tweak - Verified compatibility with WordPress version 6.8.
 - Fix   - Resolved an issue with new checkout blocks where "PayPlus Embedded" was unnecessarily hidden based on tokens.
 - Tweak - Updated translations for recently added plugin settings.

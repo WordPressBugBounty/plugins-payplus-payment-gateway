@@ -477,6 +477,18 @@ class WC_PayPlus_Gateway_POS_EMV extends WC_PayPlus_Subgateway
     public $pay_with_text = 'Pay with PayPlus - POS EMV';
 
     /**
+     * @return void
+     */
+    public function init_form_fields()
+    {
+        parent::init_form_fields(); // Call parent to initialize fields first
+        // Override the 'enabled' field default
+        if (isset($this->form_fields['enabled'])) {
+            $this->form_fields['enabled']['default'] = 'yes';
+        }
+    }
+
+    /**
      * Get the icon HTML with inline styles
      */
     public function get_icon()
@@ -490,7 +502,7 @@ class WC_PayPlus_Gateway_POS_EMV extends WC_PayPlus_Subgateway
     {
         $adminPayments = new WC_PayPlus_Admin_Payments;
         $_wpnonce = wp_create_nonce('ajax_payplus_generate_link_payment');
-        $response = $adminPayments->ajax_payplus_generate_link_payment($order_id, $_wpnonce);
+        $response = $adminPayments->ajax_payplus_generate_link_payment($order_id, $_wpnonce, true);
         $order = wc_get_order($order_id);
         $redirect_to = $order->get_checkout_order_received_url();
         $response === "success" ?
@@ -645,3 +657,30 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
         );
     }
 }
+
+/**
+ * Filter available payment gateways to hide specific PayPlus gateways on checkout.
+ *
+ * @param array $available_gateways Existing available gateways.
+ * @return array Filtered available gateways.
+ */
+function payplus_filter_checkout_gateways($available_gateways)
+{
+    // Check if it's the checkout page and not another WC endpoint
+    if (function_exists('is_checkout') && is_checkout() && !is_wc_endpoint_url()) {
+        // 1. Hide POS EMV gateway unconditionally on checkout
+        if (isset($available_gateways['payplus-payment-gateway-pos-emv'])) {
+            unset($available_gateways['payplus-payment-gateway-pos-emv']);
+        }
+
+        // 2. Hide Main PayPlus gateway if its setting 'hide_main_pp_checkout' is 'yes'
+        if (isset($available_gateways['payplus-payment-gateway'])) {
+            $main_settings = get_option('woocommerce_payplus-payment-gateway_settings', []);
+            if (isset($main_settings['hide_main_pp_checkout']) && $main_settings['hide_main_pp_checkout'] === 'yes') {
+                unset($available_gateways['payplus-payment-gateway']);
+            }
+        }
+    }
+    return $available_gateways;
+}
+add_filter('woocommerce_available_payment_gateways', 'payplus_filter_checkout_gateways', 20); // Use priority 20 to run after default checks

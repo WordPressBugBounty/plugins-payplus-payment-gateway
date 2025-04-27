@@ -31,7 +31,8 @@ jQuery(function ($) {
                             className.startsWith(
                                 "payment_method_payplus-payment-gateway-"
                             ) &&
-                            className !== "payment_method_payplus-payment-gateway-hostedfields"
+                            className !==
+                            "payment_method_payplus-payment-gateway-hostedfields"
                         ) {
                             $(this).remove();
                         }

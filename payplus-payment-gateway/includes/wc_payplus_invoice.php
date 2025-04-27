@@ -12,6 +12,7 @@ class PayplusInvoice
     private $payplus_invoice_api_key;
     private $payplus_invoice_secret_key;
     private $payplus_invoice_brand_uid;
+    private $payplus_invoice_emv_pos_brand_uid;
     private $payplus_website_code;
     private $payplus_invoice_type_document;
     private $payplus_invoice_type_document_refund;
@@ -59,8 +60,12 @@ class PayplusInvoice
 
         $this->payplus_invoice_brand_uid = (isset($this->payplus_invoice_option['payplus_invoice_brand_uid'])) ?
             $this->payplus_invoice_option['payplus_invoice_brand_uid'] : EMPTY_STRING_PAYPLUS;
-
         $this->payplus_invoice_brand_uid = isset($this->payplus_gateway_option['api_test_mode']) && $this->payplus_gateway_option['api_test_mode'] === 'yes' ? (isset($this->payplus_invoice_option['payplus_invoice_brand_uid_sandbox']) ? $this->payplus_invoice_option['payplus_invoice_brand_uid_sandbox'] : null) : $this->payplus_invoice_brand_uid;
+
+        $this->payplus_invoice_emv_pos_brand_uid = (isset($this->payplus_invoice_option['payplus_invoice_emv_pos_brand_uid'])) ?
+            $this->payplus_invoice_option['payplus_invoice_emv_pos_brand_uid'] : EMPTY_STRING_PAYPLUS;
+
+        $this->payplus_invoice_emv_pos_brand_uid = isset($this->payplus_gateway_option['api_test_mode']) && $this->payplus_gateway_option['api_test_mode'] === 'yes' ? (isset($this->payplus_invoice_option['payplus_invoice_emv_pos_brand_uid_sandbox']) ? $this->payplus_invoice_option['payplus_invoice_emv_pos_brand_uid_sandbox'] : null) : $this->payplus_invoice_emv_pos_brand_uid;
 
         $this->payplus_create_invoice_automatic = (isset($this->payplus_invoice_option['create-invoice-automatic'])
             && $this->payplus_invoice_option['create-invoice-automatic'] == "yes") ?
@@ -340,9 +345,14 @@ class PayplusInvoice
         $payload['customer']['country_iso'] === "IL" && boolval($WC_PayPlus_Gateway->paying_vat_all_order === "yes") ? $payload['customer']['paying_vat'] = true : null;
         $payload['customer'] = $payloadInvoiceData ? $payloadInvoiceData['customer'] : $payload['customer'];
 
-        if (!empty($this->payplus_invoice_brand_uid)) {
+        $isEmv = !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response_emv'));
+        if (!empty($this->payplus_invoice_brand_uid) && !$isEmv) {
             $payload['brand_uuid'] = $this->payplus_invoice_brand_uid;
         }
+        if (!empty($this->payplus_invoice_emv_pos_brand_uid) && $isEmv) {
+            $payload['brand_uuid'] = $this->payplus_invoice_emv_pos_brand_uid;
+        }
+
         if (!empty($payplusTransactionUid)) {
             $payload['transaction_uuid'] = $payloadInvoiceData ? $payloadInvoiceData['transaction_uuid'] : $payplusTransactionUid;
         }
@@ -1028,12 +1038,6 @@ class PayplusInvoice
      */
     public function payplus_invoice_create_order($order_id, $typeInvoice = false, $isCashPayment = false)
     {
-        if (!wp_verify_nonce($this->_wpnonce, 'PayPlusGateWayInvoiceNonce')) {
-            $WC_PayPlus_Gateway = $this->get_main_payplus_gateway();
-            $WC_PayPlus_Gateway->payplus_add_log_all('payplus_process_invoice_failed', "Failed to run because of nonce : payplus_process_invoice for order:  $order_id\n");
-            wp_die('Not allowed! - payplus_invoice_create_order');
-        }
-
         $payload = array();
         $WC_PayPlus_Gateway = $this->get_main_payplus_gateway();
         $handle = 'payplus_process_invoice';
@@ -1078,8 +1082,15 @@ class PayplusInvoice
                     if (!empty($payplusTransactionUid)) {
                         $payload['transaction_uuid'] = $payplusTransactionUid;
                     }
-                    if (!empty($this->payplus_invoice_brand_uid)) {
+
+                    $isEmv = !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response_emv'));
+
+                    if (!empty($this->payplus_invoice_brand_uid) && !$isEmv) {
                         $payload['brand_uuid'] = $this->payplus_invoice_brand_uid;
+                    }
+
+                    if (!empty($this->payplus_invoice_emv_pos_brand_uid) && $isEmv) {
+                        $payload['brand_uuid'] = $this->payplus_invoice_emv_pos_brand_uid;
                     }
 
                     $payplusPayload = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_payload');
@@ -1192,7 +1203,7 @@ class PayplusInvoice
                                 isset($this->payplus_invoice_option['do-not-create']) && in_array($method_payment, $this->payplus_invoice_option['do-not-create']) ||
                                 isset($this->payplus_invoice_option['do-not-create']) && in_array($order->get_payment_method(), $this->payplus_invoice_option['do-not-create'])
                             ) {
-                                $order->add_order_note('This payment method is set as: Not to create documents');
+                                $order->add_order_note('This payment method is set as: Not to create documents automatically');
                                 return;
                             }
                             $objectInvoicePaymentNoPayplus = array('method_payment' => $method_payment, 'price' => ($dual * $totalCartAmount) * 100);

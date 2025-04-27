@@ -302,6 +302,24 @@ class WC_PayPlus_Admin_Settings
                     'class' => 'payplus-documents'
                 );
                 $settings[$section][] = array(
+                    'name' => __("EMV POS Brand UID", 'payplus-payment-gateway'),
+                    'id' => 'payplus_invoice_option[payplus_invoice_emv_pos_brand_uid]',
+                    'type' => 'text',
+                    'class' => 'payplus_invoice_brand_uid',
+                    'desc' => __('Set brand UID from which the system will issue the documents (Leave blank if you only have one brand)', 'payplus-payment-gateway'),
+                    'desc_tip' => true,
+                    'class' => 'payplus-documents'
+                );
+                $settings[$section][] = array(
+                    'name' => __("EMV POS Brand UID - Development/Sandbox", 'payplus-payment-gateway'),
+                    'id' => 'payplus_invoice_option[payplus_invoice_emv_pos_brand_uid_sandbox]',
+                    'type' => 'text',
+                    'class' => 'payplus_invoice_brand_uid',
+                    'desc' => __('Set development - brand UID from which the system will issue the documents (Leave blank if you only have one brand)', 'payplus-payment-gateway'),
+                    'desc_tip' => true,
+                    'class' => 'payplus-documents'
+                );
+                $settings[$section][] = array(
                     'name' => __("Document type for charge transaction", 'payplus-payment-gateway'),
                     'id' => 'payplus_invoice_option[payplus_invoice_type_document]',
                     'type' => 'select',
@@ -411,6 +429,8 @@ class WC_PayPlus_Admin_Settings
                         'paypal' => esc_html__('PayPal', 'payplus-payment-gateway'),
                         'bacs' => esc_html__('Direct bank transfer', 'payplus-payment-gateway'),
                         'cod' => esc_html__('Cash on Delivery', 'payplus-payment-gateway'),
+                        'pos_card' => esc_html__('POS Card', 'payplus-payment-gateway'),
+                        'pos_chip_and_pin' => esc_html__('POS chip and pin', 'payplus-payment-gateway'),
                     ]
                 );
                 $settings[$section][] = array(

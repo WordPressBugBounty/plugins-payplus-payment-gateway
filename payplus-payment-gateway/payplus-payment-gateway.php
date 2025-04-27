@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.7.2
+ * Version: 7.7.3
  * Tested up to: 6.8
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.7.2');
-define('PAYPLUS_VERSION_DB', 'payplus_6_3');
+define('PAYPLUS_VERSION', '7.7.3');
+define('PAYPLUS_VERSION_DB', 'payplus_6_4');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -41,6 +41,7 @@ class WC_PayPlus
     public $shipping_woo_js;
     public $disableCartHashCheck;
     public $updateStatusesIpn;
+    public $hidePayPlusGatewayNMW;
     public $pwGiftCardData;
 
     /**
@@ -68,6 +69,7 @@ class WC_PayPlus
         $this->importApplePayScript = boolval(property_exists($this->payplus_payment_gateway_settings, 'import_applepay_script') && $this->payplus_payment_gateway_settings->import_applepay_script === 'yes');
         $this->isPayPlus = boolval(property_exists($this->payplus_payment_gateway_settings, 'enabled') && $this->payplus_payment_gateway_settings->enabled === 'yes');
         $this->secret_key = boolval($this->payplus_payment_gateway_settings->api_test_mode === "yes") ? $this->payplus_payment_gateway_settings->dev_secret_key ?? null : $this->payplus_payment_gateway_settings->secret_key;
+        $this->hidePayPlusGatewayNMW = boolval(property_exists($this->payplus_payment_gateway_settings, 'hide_main_pp_checkout') && $this->payplus_payment_gateway_settings->hide_main_pp_checkout === 'yes');
 
         add_action('admin_init', [$this, 'check_environment']);
         add_action('admin_notices', [$this, 'admin_notices'], 15);
@@ -793,6 +795,7 @@ class WC_PayPlus
                             "isHostedFields" => isset($this->hostedFieldsOptions['enabled']) ? boolval($this->hostedFieldsOptions['enabled'] === "yes") : false,
                             "hostedFieldsWidth" => isset($this->hostedFieldsOptions['hosted_fields_width']) ? $this->hostedFieldsOptions['hosted_fields_width'] : 100,
                             "hidePPGateway" => isset($this->hostedFieldsOptions['hide_payplus_gateway']) ? boolval($this->hostedFieldsOptions['hide_payplus_gateway'] === "yes") : false,
+                            "hidePayPlusGatewayNMW" => $this->hidePayPlusGatewayNMW,
                             "hostedFieldsIsMain" => isset($this->hostedFieldsOptions['hosted_fields_is_main']) ? boolval($this->hostedFieldsOptions['hosted_fields_is_main'] === "yes") : false,
                             "saveCreditCard" => __("Save credit card in my account", "payplus-payment-gateway"),
                             "isSavingCerditCards" => boolval(property_exists($this->payplus_payment_gateway_settings, 'create_pp_token') && $this->payplus_payment_gateway_settings->create_pp_token === 'yes'),
@@ -1292,9 +1295,6 @@ class WC_PayPlus
              */
             public static function payplus_check_exists_table($wpnonce, $table = 'payplus_order')
             {
-                if (!wp_verify_nonce(sanitize_key($wpnonce), 'PayPlusGateWayNonce')) {
-                    wp_die('Not allowed! - payplus_check_exists_table');
-                }
                 $transient_key = 'payplus_check_exists_table_' . $table;
                 $flag = get_transient($transient_key);
                 if ($flag === false) {
@@ -1308,11 +1308,8 @@ class WC_PayPlus
             }
             public static function payplus_get_admin_menu($nonce)
             {
-                if (!wp_verify_nonce(sanitize_key($nonce), 'menu_option')) {
-                    wp_die('Not allowed! - payplus_get_admin_menu');
-                }
                 ob_start();
-                $currentSection = isset($_GET['section']) ? sanitize_text_field(wp_unslash($_GET['section'])) : "";
+                $currentSection = isset($_GET['section']) ? sanitize_text_field(wp_unslash($_GET['section'])) : ""; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
                 $adminTabs = WC_PayPlus_Admin_Settings::getAdminTabs();
                 echo "<div id='payplus-options'>";
                 if (count($adminTabs)) {
