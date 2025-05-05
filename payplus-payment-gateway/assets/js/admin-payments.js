@@ -16,6 +16,128 @@ jQuery(document).ready(function ($) {
         });
     }
 
+    $("#display-payplus-meta-data").click(function (event) {
+        event.preventDefault();
+        const $button = $(this);
+        const orderId = $button.data("order-id");
+        const nonce = $("#payplus_display_meta_nonce").val();
+
+        // Optional: Add a loading state to the button
+        $button.prop("disabled", true).text("Loading...");
+
+        $.ajax({
+            type: "post",
+            dataType: "json", // Expect a JSON response, adjust if needed
+            url: payplus_script_admin.ajax_url, // Assuming this global variable holds the AJAX URL
+            data: {
+                action: "display-meta-data",
+                order_id: orderId,
+                _ajax_nonce: nonce, // Send the nonce for verification
+            },
+            success: function (response) {
+                // Handle the successful response
+                // For example, display a message or update the UI
+                // Remove any existing popup first
+                $("#payplus-response-popup").remove();
+
+                // Create popup elements
+                const $popupOverlay = $('<div id="payplus-response-popup"></div>').css({
+                    position: 'fixed',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                    zIndex: 10000, // Ensure it's on top
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '20px'
+                });
+
+                const $popupContent = $('<div></div>').css({
+                    backgroundColor: '#fff',
+                    padding: '30px',
+                    borderRadius: '5px',
+                    maxHeight: '80vh',
+                    maxWidth: '80vw',
+                    overflow: 'auto',
+                    position: 'relative',
+                    boxSizing: 'border-box'
+                });
+
+                const $closeButton = $('<span class="close-popup">&times;</span>').css({
+                    position: 'absolute',
+                    top: '10px',
+                    right: '15px',
+                    fontSize: '24px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    lineHeight: '1'
+                });
+
+                const $preFormattedJson = $('<pre></pre>').css({
+                    whiteSpace: 'pre-wrap', // Ensure wrapping
+                    wordWrap: 'break-word', // Break long words/strings
+                    margin: 0 // Reset default margin
+                });
+
+                // Format and set the JSON content
+                try {
+                    const formattedJson = JSON.stringify(response, null, 2); // Pretty print JSON
+                    $preFormattedJson.text(formattedJson);
+                } catch (e) {
+                    console.error("Error stringifying JSON response:", e);
+                    $preFormattedJson.text("Error displaying response. See console for details.");
+                }
+
+                // Assemble the popup
+                $popupContent.append($closeButton);
+                $popupContent.append($preFormattedJson);
+                $popupOverlay.append($popupContent);
+
+                // Add close functionality
+                $closeButton.on('click', function() {
+                    $popupOverlay.fadeOut(function() { $(this).remove(); });
+                });
+                // Optional: Close when clicking the overlay background
+                $popupOverlay.on('click', function(e) {
+                    if (e.target === this) { // Only if clicking the overlay itself
+                         $popupOverlay.fadeOut(function() { $(this).remove(); });
+                    }
+                });
+
+                // Append to body and show
+                $('body').append($popupOverlay);
+                $popupOverlay.fadeIn();
+
+                // Original logic based on response status (can still run alongside the popup)
+                if (response && response.success) {
+                    // alert("Meta data displayed/processed successfully."); // Replace with actual UI update
+                    // Potentially reload or update part of the page based on the response
+                } else {
+                    alert(
+                        "Error: " +
+                        (response.data ? response.data : "Unknown error")
+                    );
+                }
+                // Restore button state
+                $button
+                    .prop("disabled", false)
+                    .text("Display Meta Data"); // Restore original text
+            },
+            error: function (jqXHR, textStatus, errorThrown) {
+                // Handle AJAX errors
+                console.error("AJAX Error:", textStatus, errorThrown);
+                alert("An error occurred while processing the request.");
+                // Restore button state
+                $button
+                    .prop("disabled", false)
+                    .text("Display Meta Data"); // Restore original text
+            },
+        });
+    });
+
     $(".do-api-refund-payplus").click(async function (event) {
         event.preventDefault();
         $(this).addClass("button-loading");
@@ -134,7 +256,7 @@ jQuery(document).ready(function ($) {
     });
 
     $("#custom-button-get-pp").click(function () {
-        let loader = $("#order_data").find(".payplus_loader_gpp");
+        let loader = $("#payplus_buttons_metabox").find(".payplus_loader_gpp");
         let side = "right";
 
         // check if page is rtl or ltr and change the direction of the loader
@@ -148,7 +270,7 @@ jQuery(document).ready(function ($) {
             position: "absolute",
             top: "5px",
         });
-        $("#custom-button-get-pp").fadeOut();
+        // $("#custom-button-get-pp").fadeOut();
         $("#get-invoice-plus-data").fadeOut();
         loader.fadeIn();
 
@@ -173,7 +295,7 @@ jQuery(document).ready(function ($) {
         ) {
             return;
         }
-        let loader = $("#order_data").find(".payplus_loader_gpp");
+        let loader = $("#payplus_buttons_metabox").find(".payplus_loader_gpp");
         let side = "right";
 
         // check if page is rtl or ltr and change the direction of the loader
@@ -187,8 +309,8 @@ jQuery(document).ready(function ($) {
             position: "absolute",
             top: "5px",
         });
-        $("#custom-button-get-pp").fadeOut();
-        $("#get-invoice-plus-data").fadeOut();
+        // $("#custom-button-get-pp").fadeOut();
+        // $("#get-invoice-plus-data").fadeOut();
         $("#create-invoice-plus-doc").fadeOut();
         loader.fadeIn();
 
@@ -213,7 +335,7 @@ jQuery(document).ready(function ($) {
         ) {
             return;
         }
-        let loader = $("#order_data").find(".payplus_loader_gpp");
+        let loader = $("#payplus_buttons_metabox").find(".payplus_loader_gpp");
         let side = "right";
 
         // check if page is rtl or ltr and change the direction of the loader
@@ -227,8 +349,8 @@ jQuery(document).ready(function ($) {
             position: "absolute",
             top: "5px",
         });
-        $("#custom-button-get-pp").fadeOut();
-        $("#get-invoice-plus-data").fadeOut();
+        // $("#custom-button-get-pp").fadeOut();
+        // $("#get-invoice-plus-data").fadeOut();
         $("#create-invoice-plus-doc").fadeOut();
         loader.fadeIn();
 
@@ -359,9 +481,9 @@ jQuery(document).ready(function ($) {
     $("#payplus-token-payment").click(function (event) {
         event.preventDefault();
         let payplusChargeAmount = $(this)
-                .closest(".delayed-payment")
-                .find("#payplus_charge_amount")
-                .val(),
+            .closest(".delayed-payment")
+            .find("#payplus_charge_amount")
+            .val(),
             payplusOrderId = $(this)
                 .closest(".delayed-payment")
                 .find("#payplus_order_id")
@@ -673,15 +795,15 @@ if (
         jQuery("#woocommerce_payplus-payment-gateway_transaction_type").val()
     ) !== 2
         ? jQuery(
-              "#woocommerce_payplus-payment-gateway_check_amount_authorization"
-          )
-              .closest("tr")
-              .fadeOut()
+            "#woocommerce_payplus-payment-gateway_check_amount_authorization"
+        )
+            .closest("tr")
+            .fadeOut()
         : jQuery(
-              "#woocommerce_payplus-payment-gateway_check_amount_authorization"
-          )
-              .closest("tr")
-              .fadeIn();
+            "#woocommerce_payplus-payment-gateway_check_amount_authorization"
+        )
+            .closest("tr")
+            .fadeIn();
     //display API mode
     if (
         jQuery("#woocommerce_payplus-payment-gateway_api_test_mode").val() ===
@@ -691,8 +813,8 @@ if (
         modeMessage["he"] = "מצב נוכחי: מצב ארגז חול(פיתוח)";
         currentMode = jQuery(
             "<tr><td style='color: red;' id='currentMode'>" +
-                modeMessage[currentLanguage] +
-                "</td></tr></tr>"
+            modeMessage[currentLanguage] +
+            "</td></tr></tr>"
         );
         showDevs();
     } else {
@@ -705,8 +827,8 @@ if (
             modeMessage["he"] = "מצב נוכחי: מצב ייצור";
             currentMode = jQuery(
                 "<tr><td id='currentMode'>" +
-                    modeMessage[currentLanguage] +
-                    "</td></tr></tr>"
+                modeMessage[currentLanguage] +
+                "</td></tr></tr>"
             );
             showProds();
         }
@@ -753,8 +875,8 @@ function payplusMenusDisplay() {
 
         transactionTypeMessage = jQuery(
             "<tr><td id='warningMessage'>" +
-                message[currentLanguage] +
-                "</td></tr></tr>"
+            message[currentLanguage] +
+            "</td></tr></tr>"
         );
         $firstInputWithId.closest("tr").before(transactionTypeMessage);
     }
@@ -839,8 +961,8 @@ function payplusMenusDisplay() {
                 : iframes["payplus-faq"];
         let $settingsContainer = jQuery(
             '<div id="settingsContainer"><div class="tab-section-payplus" id="tab-payplus-gateway"></div><div class="right-tab-section-payplus hideIt"><h2>' +
-                iframeHeadline +
-                "</h2></div>"
+            iframeHeadline +
+            "</h2></div>"
         );
         //Add all existing tables to .tab-section-payplus
         $settingsContainer
