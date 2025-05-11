@@ -36,7 +36,8 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
             __('Pay with Valuecard via PayPlus', 'payplus-payment-gateway'),
             __('Pay with finitiOne via PayPlus', 'payplus-payment-gateway'),
             __('Pay with PayPlus - POS EMV', 'payplus-payment-gateway'),
-            __('Pay with PayPlus Embedded', 'payplus-payment-gateway')
+            __('Pay with PayPlus Embedded', 'payplus-payment-gateway'),
+            __('Pay with Wire Transfer via PayPlus', 'payplus-payment-gateway')
 
         );
         $this->allTypePayment = array(
@@ -49,6 +50,8 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
             __('Valuecard', 'payplus-payment-gateway'),
             __('finitiOne', 'payplus-payment-gateway'),
             __('PayPlus - POS EMV', 'payplus-payment-gateway'),
+            __('PayPlus Embedded', 'payplus-payment-gateway'),
+            __('Wire Transfer', 'payplus-payment-gateway'),
             __('hostedFields', 'payplus-payment-gateway')
         );
 
@@ -116,6 +119,9 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
             case 'PayPlus - POS EMV':
                 $methodTitleText = esc_html__('PayPlus - POS EMV', 'payplus-payment-gateway');
                 break;
+            case 'PayPlus - Wire Transfer':
+                $methodTitleText = esc_html__('PayPlus - Wire Transfer', 'payplus-payment-gateway');
+                break;
             case 'PayPlus - Embedded':
                 $methodTitleText = esc_html__('PayPlus - Embedded', 'payplus-payment-gateway');
                 break;
@@ -151,6 +157,9 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
                 break;
             case 'Pay with Embedded':
                 $payWithText = esc_html__('Pay with Embedded', 'payplus-payment-gateway');
+                break;
+            case 'Pay with Wire Transfer':
+                $payWithText = esc_html__('Pay with Wire Transfer', 'payplus-payment-gateway');
                 break;
         }
         $this->form_fields = [
@@ -326,6 +335,9 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
             case 'Pay with PayPlus Embedded':
                 $methodDescriptionText = esc_html__('Pay with PayPlus Embedded', 'payplus-payment-gateway');
                 break;
+            case 'Pay with Wire Transfer via PayPlus':
+                $methodDescriptionText = esc_html__('Pay with Wire Transfer via PayPlus', 'payplus-payment-gateway');
+                break;
         }
 
         $subOptionsettings = get_option($this->get_option_key(), $defaultOptions);
@@ -465,6 +477,18 @@ class WC_PayPlus_Gateway_FinitiOne extends WC_PayPlus_Subgateway
     public $iconURL = 'assets/images/finitioneLogo.png';
     public $pay_with_text = 'Pay with Tav finitiOne';
 }
+
+class WC_PayPlus_Gateway_WireTransfer extends WC_PayPlus_Subgateway
+{
+    public $id = 'payplus-payment-gateway-wire-transfers';
+    public $method_title_text = 'PayPlus - Wire Transfer';
+    public $default_description_settings_text = 'Wire Transfer payment via PayPlus';
+    public $method_description_text = 'Pay with Wire Transfer via PayPlus';
+    public $payplus_default_charge_method = 'wire-transfers';
+    public $iconURL = 'assets/images/wire-transfers.png';
+    public $pay_with_text = 'Pay with Wire Transfer';
+}
+
 
 class WC_PayPlus_Gateway_POS_EMV extends WC_PayPlus_Subgateway
 {
