@@ -251,10 +251,10 @@ class WC_PayPlus_Statics
                     $responsePayPlus = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response', true);
                     $manualOrderPayments = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_order_payments', true) ? json_decode(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_order_payments', true), true) : false;
                     $responseArray = json_decode($responsePayPlus, true);
-                    if (json_last_error() !== JSON_ERROR_NONE) {
+                    if (!empty($responsePayPlus) && json_last_error() !== JSON_ERROR_NONE) {
                         $error_message = json_last_error_msg();
                         $fixedJson = WC_PayPlus_Statics::fixMalformedJson($responsePayPlus);
-                        $payPlusFixedJson = ['payplus_response' => $fixedJson];
+                        $payPlusFixedJson = ['payplus_responses' => $fixedJson];
                         $order = wc_get_order($order_id);
                         WC_PayPlus_Meta_Data::update_meta($order, $payPlusFixedJson);
                         $responseArray = json_decode($fixedJson, true);
@@ -579,23 +579,57 @@ class WC_PayPlus_Statics
 
         /**
          * @param $url
-         * @param $payload
+         * @param array|string $payload
          * @param $method
          * @return array|WP_Error
          */
-        public static function payPlusRemote($url, $payload = [], $method = "post")
+        public static function payPlusRemote($url, $payload, $method = "post")
         {
-            is_array($payload) ? $payload = wp_json_encode($payload) : $payload;
+            // If initial payload is an array, convert to JSON string.
+            if (is_array($payload)) {
+                $payload = wp_json_encode($payload);
+            }
+            // Now $payload is a string (if original was array) or original type (if not array e.g. already a string).
+
             $options   = get_option('woocommerce_payplus-payment-gateway_settings');
             $testMode  = boolval($options['api_test_mode'] === 'yes');
             $apiKey    = $testMode === true ? $options['dev_api_key'] : $options['api_key'];
             $secretKey = $testMode === true ? $options['dev_secret_key'] : $options['secret_key'];
-            isset($options['enable_dev_mode']) && $options['enable_dev_mode'] === "yes"
-                ? $payload = apply_filters('payplus_remote_payload', $payload) : null;
+
+            // Apply filter if dev mode is enabled. $payload might change type here.
+            if (isset($options['enable_dev_mode']) && $options['enable_dev_mode'] === "yes") {
+                $payload = apply_filters('payplus_remote_payload', $payload);
+            }
+
             $userAgent = isset($_SERVER['HTTP_USER_AGENT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_USER_AGENT'])) : "";
 
+            $request_body_for_args = [];
+            if (strtolower($method) !== 'post') { // For GET or other non-POST methods
+                if (is_string($payload)) {
+                    // If $payload is a string, try to decode it as JSON.
+                    $decoded = json_decode($payload, true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                        $request_body_for_args = $decoded; // Use the decoded array for GET's query params
+                    } else {
+                        // If it's a string but not valid JSON, or json_decode doesn't return an array,
+                        // default to empty array to prevent http_build_query error with wp_remote_get.
+                        $request_body_for_args = [];
+                    }
+                } elseif (is_array($payload)) {
+                    // If $payload is already an array (e.g., filter returned an array), use it directly.
+                    $request_body_for_args = $payload;
+                } else {
+                    // If $payload is neither string nor array (e.g. int, bool, null),
+                    // default to empty array for GET's body.
+                    $request_body_for_args = [];
+                }
+            } else {
+                // For POST method, $request_body_for_args is $payload (expected to be a string, typically JSON).
+                $request_body_for_args = $payload;
+            }
+
             $args = array(
-                'body' => $payload,
+                'body' => $request_body_for_args,
                 'timeout' => '60',
                 'redirection' => '5',
                 'httpversion' => '1.0',
@@ -610,7 +644,7 @@ class WC_PayPlus_Statics
                 )
             );
 
-            if ($method == "post") {
+            if (strtolower($method) == "post") {
                 $response = wp_remote_post($url, $args);
             } else {
                 $response = wp_remote_get($url, $args);

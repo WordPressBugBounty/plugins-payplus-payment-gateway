@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.7.7
+ * Version: 7.7.8
  * Tested up to: 6.8
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,7 +19,7 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.7.7');
+define('PAYPLUS_VERSION', '7.7.8');
 define('PAYPLUS_VERSION_DB', 'payplus_6_7');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
@@ -688,7 +688,7 @@ class WC_PayPlus
                     add_action('woocommerce_after_checkout_validation', [$this, 'payplus_validation_cart_checkout'], 10, 2);
                     add_action('wp_enqueue_scripts', [$this, 'load_checkout_assets']);
                     add_action('woocommerce_api_callback_response', [$this, 'callback_response']);
-                    add_action('payplus_delayed_event', [$this, 'handle_delayed_event']);
+                    // add_action('payplus_delayed_event', [$this, 'handle_delayed_event']);
 
                     if (WP_DEBUG_LOG) {
                         add_action('woocommerce_api_callback_response_hash', [$this, 'callback_response_hash']);
@@ -1111,6 +1111,25 @@ class WC_PayPlus
                 if ($payplusGenHash === $payplusHash) {
                     $this->payplus_gateway = $this->get_main_payplus_gateway();
                     $order_id = intval($response['transaction']['more_info']);
+                    if ($order_id === 0) {
+                        // Log an error or handle the case where order_id is invalid
+                        $this->payplus_gateway->payplus_add_log_all(
+                            'payplus_callback_secured',
+                            "\nPayPlus order # $order_id INVALID ORDER ID - ABORTING CALLBACK FUNCTION:"
+                        );
+                        wp_die(
+                            wp_json_encode(array(
+                                'status' => 'error',
+                                'message' => 'Invalid order ID.',
+                            )),
+                            '',
+                            array(
+                                'response' => 200, // Bad Request
+                                'content_type' => 'application/json'
+                            )
+                        );
+                        return;
+                    }
                     $order = wc_get_order($order_id);
                     WC_PayPlus_Meta_Data::update_meta($order, ['payplus_callback_response' => $json]);
                     // Add a delayed event
@@ -1118,7 +1137,7 @@ class WC_PayPlus
                         'payplus_callback_secured',
                         "\nPayPlus order # $order_id STARTING CALLBACK FUNCTION:"
                     );
-                    $this->payplus_gateway->legacy_callback_response($order_id);
+                    $this->payplus_gateway->legacy_callback_response($order_id, $json);
                     $response = array(
                         'status' => 'success',
                         'message' => 'PayPlus callback function ended.',
