@@ -560,6 +560,22 @@ class WC_PayPlus_Admin_Settings
                     'class' => 'payplus-vat'
                 ];
                 $settings[$section][] = [
+                    'title' => __('Every order is allways with VAT NO MATTER WHAT!', 'payplus-payment-gateway'),
+                    'type' => 'checkbox',
+                    'desc' => __('This will make every order with VAT, even if the customer is not paying VAT', 'payplus-payment-gateway'),
+                    'desc_tip' => true,
+                    'default' => '',
+                    'id' => 'woocommerce_payplus-payment-gateway_settings[allways_pay_vat]',
+                    'class' => 'payplus-vat',
+                ];
+                $settings[$section][] = [
+                    'title' => __('Use new/other - "Other country vat settings" (Default: Unchecked)', 'payplus-payment-gateway'),
+                    'type' => 'checkbox',
+                    'default' => '',
+                    'id' => 'woocommerce_payplus-payment-gateway_settings[new_vat_order]',
+                    'class' => 'payplus-vat',
+                ];
+                $settings[$section][] = [
                     'title' => __('The language of the invoices or documents issued to foreign customers (assuming your invoicing company supports this language)', 'payplus-payment-gateway'),
                     'type' => 'text',
                     'default' => 'HE',
