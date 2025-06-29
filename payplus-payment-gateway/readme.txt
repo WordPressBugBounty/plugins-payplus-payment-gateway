@@ -4,7 +4,7 @@ Tags: Woocommerce Payment Gateway, Credit Cards, Charges and Refunds, Subscripti
 Requires at least: 3.0.1
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 7.7.9
+Stable tag: 7.8.0
 PlugIn URL: https://www.payplus.co.il/wordpress
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
@@ -86,7 +86,11 @@ If you get stuck, you can ask for help in the Plugin Forum. or contact us direct
 
 == Changelog ==
 
-== 7.7.9 - 11-06-2025 =
+== 7.8.0 - 29-06-2025 =
+
+- Added - Do not create invoices+ documents option for Stripe payment gateway.
+
+== 7.7.9 - 11-06-2025 = 
 
 - Added - Separate VAT configuration options for international customers.
 
