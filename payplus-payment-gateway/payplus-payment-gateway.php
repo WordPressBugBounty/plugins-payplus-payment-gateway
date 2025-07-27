@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 7.8.3
+ * Version: 7.8.4
  * Tested up to: 6.8
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '7.8.3');
-define('PAYPLUS_VERSION_DB', 'payplus_7_8_3');
+define('PAYPLUS_VERSION', '7.8.4');
+define('PAYPLUS_VERSION_DB', 'payplus_7_8_4');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -69,7 +69,8 @@ class WC_PayPlus
         $this->isAutoPPCC = boolval(property_exists($this->payplus_payment_gateway_settings, 'auto_load_payplus_cc_method') && $this->payplus_payment_gateway_settings->auto_load_payplus_cc_method === 'yes');
         $this->importApplePayScript = boolval(property_exists($this->payplus_payment_gateway_settings, 'import_applepay_script') && $this->payplus_payment_gateway_settings->import_applepay_script === 'yes');
         $this->isPayPlus = boolval(property_exists($this->payplus_payment_gateway_settings, 'enabled') && $this->payplus_payment_gateway_settings->enabled === 'yes');
-        $this->secret_key = boolval($this->payplus_payment_gateway_settings->api_test_mode === "yes") ? $this->payplus_payment_gateway_settings->dev_secret_key ?? null : $this->payplus_payment_gateway_settings->secret_key;
+        $is_test_mode = property_exists($this->payplus_payment_gateway_settings, 'api_test_mode') && $this->payplus_payment_gateway_settings->api_test_mode === "yes";
+        $this->secret_key = $is_test_mode ? ($this->payplus_payment_gateway_settings->dev_secret_key ?? null) : ($this->payplus_payment_gateway_settings->secret_key ?? null);
         $this->hidePayPlusGatewayNMW = boolval(property_exists($this->payplus_payment_gateway_settings, 'hide_main_pp_checkout') && $this->payplus_payment_gateway_settings->hide_main_pp_checkout === 'yes');
         $this->iframeAutoHeight = boolval(property_exists($this->payplus_payment_gateway_settings, 'iframe_auto_height') && $this->payplus_payment_gateway_settings->iframe_auto_height === 'yes');
 
@@ -157,6 +158,23 @@ class WC_PayPlus
         check_ajax_referer('frontNonce', '_ajax_nonce');
         $this->payplus_gateway = $this->get_main_payplus_gateway();
         $order_id = isset($_POST['order_id']) ? intval($_POST['order_id']) : 0;
+        $pwGiftCardData = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_pw_gift_cards');
+        $decodedCardData = json_decode($pwGiftCardData, true);
+        
+        if (!empty($pwGiftCardData) && is_array($decodedCardData)) {
+            // Get the first value from the $pwGiftCardData array
+            $firstGiftCard = reset($decodedCardData['gift_cards']);
+            if ($this->payplus_gateway->pw_gift_card_auto_cancel_unpaid_order && floatval($firstGiftCard) == 0) {
+                $cancelledResponse = $this->payplus_gateway->cancel_pending_giftcard_orders_for_current_user($pwGiftCardData, $order_id);
+                if ($cancelledResponse === false) {
+                    wc_add_notice(__('Gift Card refreshed - Please <a href="#">try again</a>.', 'payplus-payment-gateway'), 'error');
+                    wp_send_json_error([
+                        'result' => 'fail',
+                        'redirect' => '',
+                    ]);
+                }
+            }
+        }
         $order = wc_get_order($order_id);
         if ($order) {
             $saveToken = isset($_POST['saveToken']) ? filter_var(wp_unslash($_POST['saveToken']), FILTER_VALIDATE_BOOLEAN) : false;
