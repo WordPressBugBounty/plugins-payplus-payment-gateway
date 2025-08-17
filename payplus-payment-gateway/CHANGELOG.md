@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [7.8.7] - 17-08-2025 - (Ozzy)
+
+- Added   - Introduced PayPlus Invoice+ Runner manager - enables batch processing of today's orders to generate invoices for orders missing them.
+- Added   - Included PayPlus Invoice+ Runner cron functionality in Invoice+ settings - once activated it will automatically executes every 30 minutes to generate invoices, functioning similarly to the manual manager.
+
 ## [7.8.6] - 06-08-2025 - (Lennon)
 
 - Tweak   - Enhanced the 3D Secure iframe content and positioning in PayPlus Embedded for mobile devices, ensuring correct display in both RTL and LTR languages.
