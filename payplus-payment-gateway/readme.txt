@@ -1,10 +1,10 @@
 ﻿=== PayPlus Payment Gateway ===
 Contributors: payplus
 Tags: Woocommerce Payment Gateway, Credit Cards, Charges and Refunds, Subscriptions, Tokenization
-Requires at least: 3.0.1
+Requires at least: 6.2
 Tested up to: 6.8
 Requires PHP: 7.4
-Stable tag: 7.8.7
+Stable tag: 7.8.8
 PlugIn URL: https://www.payplus.co.il/wordpress
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
@@ -86,10 +86,15 @@ If you get stuck, you can ask for help in the Plugin Forum. or contact us direct
 
 == Changelog ==
 
+== 7.8.8 - 17-08-2025 =
+
+- Fix     - Resolved Plugin Check warnings and errors.
+- Fix     - Resolved Payplus Embedded css issue.
+
 == 7.8.7 - 17-08-2025 =
 
 - Added   - Introduced PayPlus Invoice+ Runner manager - enables batch processing of today's orders to generate invoices for orders missing them.
-- Added   - Included PayPlus Invoice+ Runner cron functionality in Invoice+ settings - once activated it will automatically executes every 30 minutes to generate invoices, functioning similarly to the manual manager.
+- Added   - Included PayPlus Invoice+ Runner cron functionality in Invoice+ settings - once activated it will automatically execute every 30 minutes to generate invoices, functioning similarly to the manual manager.
 
 == 7.8.6 - 06-08-2025 =
 
