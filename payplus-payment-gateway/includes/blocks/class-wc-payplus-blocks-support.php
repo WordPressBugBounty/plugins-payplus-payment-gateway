@@ -403,8 +403,11 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
                 $result->set_payment_details('');
             }
 
+            // THIS IS THE BOTTLENECK - External API call
             $payload = $main_gateway->generatePaymentLink($this->orderId, is_admin(), null, $subscription = false, $custom_more_info = '', $move_token = false, ['chargeDefault' => $chargeDefault, 'hideOtherPayments' => $hideOtherPayments, 'isSubscriptionOrder' => $this->isSubscriptionOrder]);
             WC_PayPlus_Meta_Data::update_meta($order, ['payplus_payload' => $payload]);
+            
+            // ANOTHER BOTTLENECK - Remote HTTP request
             $response = WC_PayPlus_Statics::payPlusRemote($main_gateway->payment_url, $payload);
 
             $payment_details = $result->payment_details;
@@ -495,6 +498,19 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
         if (function_exists('wp_set_script_translations')) {
             wp_set_script_translations('wc-payplus-payments-block', 'payplus-payment-gateway', PAYPLUS_PLUGIN_URL . 'languages/');
         }
+
+        // Also ensure wp.i18n is available for the frontend
+        wp_localize_script(
+            'wc-payplus-payments-block',
+            'payplus_i18n',
+            [
+                'processing_payment' => __('Processing your payment now', 'payplus-payment-gateway'),
+                'generating_page' => __('Generating payment page', 'payplus-payment-gateway'),
+                'loading_page' => __('Loading payment page', 'payplus-payment-gateway'),
+                'click_to_close' => __('Click this to close.', 'payplus-payment-gateway'),
+                'payment_page_failed' => __('Error: the payment page failed to load.', 'payplus-payment-gateway'),
+            ]
+        );
 
         return ['wc-payplus-payments-block'];
     }
