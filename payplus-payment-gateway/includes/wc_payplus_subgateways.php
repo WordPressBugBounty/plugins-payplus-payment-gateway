@@ -346,7 +346,7 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
         $this->enabled = $this->settings['enabled'] = $subOptionsettings['enabled'];
         $this->settings['description'] = $subOptionsettings['description'];
         $this->settings['title'] = (!empty($subOptionsettings['title'])) ? $subOptionsettings['title'] : $methodDescriptionText;
-        $this->settings['display_mode'] = $subOptionsettings['display_mode'] === "default" ? $this->allSettings['display_mode'] : $subOptionsettings['display_mode'];
+        $this->settings['display_mode'] = isset($subOptionsettings['display_mode']) && $subOptionsettings['display_mode'] === "default" ? (is_array($this->allSettings) && isset($this->allSettings['display_mode']) ? $this->allSettings['display_mode'] : 'default') : (isset($subOptionsettings['display_mode']) ? $subOptionsettings['display_mode'] : 'default');
         $this->settings['hide_icon'] = $subOptionsettings['hide_icon'];
         $this->settings['iframe_height'] = $subOptionsettings['iframe_height'];
         $this->settings['show_hide_submit_button'] = isset($subOptionsettings['show_hide_submit_button']) ? $subOptionsettings['show_hide_submit_button'] : 'no';
@@ -361,6 +361,12 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
 
         if ($this->settings['sub_hide_other_charge_methods'] != 2 && $this->settings['sub_hide_other_charge_methods'] !== null) {
             $this->settings['hide_other_charge_methods'] = $this->settings['sub_hide_other_charge_methods'];
+        }
+        
+        // Load POS EMV specific settings
+        if ($this->id === 'payplus-payment-gateway-pos-emv') {
+            $this->settings['show_in_regular_checkout'] = isset($subOptionsettings['show_in_regular_checkout']) ? $subOptionsettings['show_in_regular_checkout'] : 'no';
+            $this->settings['show_in_blocks_checkout'] = isset($subOptionsettings['show_in_blocks_checkout']) ? $subOptionsettings['show_in_blocks_checkout'] : 'no';
         }
     }
 
@@ -510,6 +516,23 @@ class WC_PayPlus_Gateway_POS_EMV extends WC_PayPlus_Subgateway
         if (isset($this->form_fields['enabled'])) {
             $this->form_fields['enabled']['default'] = 'yes';
         }
+        
+        // Add checkboxes for checkout visibility
+        $this->form_fields['show_in_regular_checkout'] = [
+            'title' => __('Show in Regular Checkout', 'payplus-payment-gateway'),
+            'type' => 'checkbox',
+            'label' => __('Show in Regular Checkout', 'payplus-payment-gateway'),
+            'description' => __('Enable this option to show POS EMV in regular WooCommerce checkout.', 'payplus-payment-gateway'),
+            'default' => 'no'
+        ];
+        
+        $this->form_fields['show_in_blocks_checkout'] = [
+            'title' => __('Show in Blocks Checkout', 'payplus-payment-gateway'),
+            'type' => 'checkbox',
+            'label' => __('Show in Blocks Checkout', 'payplus-payment-gateway'),
+            'description' => __('Enable this option to show POS EMV in WooCommerce Blocks checkout.', 'payplus-payment-gateway'),
+            'default' => 'no'
+        ];
     }
 
     /**
@@ -596,12 +619,89 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
     public function getHostedPayload()
     {
         check_ajax_referer('frontNonce', '_ajax_nonce');
-        $hostedPayload = WC()->session->get('hostedPayload');
-        $hostedResponse = WC()->session->get('hostedResponse');
+        $order_id = WC()->session->get('order_awaiting_payment');
+        
+        // Get the main gateway settings (lightweight, no API calls)
+        $mainGatewaySettings = get_option('woocommerce_payplus-payment-gateway_settings', []);
+        $hostedFieldsOptions = get_option('woocommerce_payplus-payment-gateway-hostedfields_settings', []);
+        
+        if (is_numeric($order_id)) {
+            $order = wc_get_order($order_id);
+            if ($order) {
+                $hostedPayload = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_embedded_payload');
+                $hostedResponse = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_embedded_update_page_response');
+            }
+        }
+        
+        // Fallback: if still empty, get from session order meta
+        if (empty($hostedResponse)) {
+            $hostedPayload = WC()->session->get('hostedPayload');
+            $hostedResponse = WC()->session->get('hostedResponse');
+        }
+        
         wp_send_json_success(array(
             'hostedPayload' => $hostedPayload,
             'hostedResponse' => $hostedResponse
         ));
+    }
+
+
+    public function double_check_ipn_via_ajax()
+    {
+        check_ajax_referer('frontNonce', '_ajax_nonce');
+        $order_id = isset($_POST['order_id']) ? intval($_POST['order_id']) : 0;
+        
+        if (!$order_id) {
+            wp_send_json_error(array('message' => 'Invalid order ID'));
+            return;
+        }
+        
+        $payplus_instance = WC_PayPlus::get_instance();
+        $mainGateway = $payplus_instance->get_main_payplus_gateway();
+        
+        if (!$mainGateway || !isset($mainGateway->enableDoubleCheckIfPruidExists) || !$mainGateway->enableDoubleCheckIfPruidExists) {
+            wp_send_json_error(array('message' => 'Double check IPN not enabled'));
+            return;
+        }
+        
+        $payplus_page_request_uid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid', true);
+        
+        if (empty($payplus_page_request_uid)) {
+            wp_send_json_error(array('message' => 'No page request UID found'));
+            return;
+        }
+        
+        $mainGateway->payplus_add_log_all('payplus_double_check', 'Double check IPN AJAX for Hosted Fields Order ID: ' . $order_id . ' | Page Request UID: ' . $payplus_page_request_uid);
+        
+        $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
+        $_wpnonce = wp_create_nonce('_wp_payplusIpn');
+        $status = $PayPlusAdminPayments->payplusIpn(
+            $order_id,
+            $_wpnonce,
+            $saveToken = false,
+            $isHostedPayment = true,
+            $allowUpdateStatuses = true,
+            $allowReturn = false,
+            $getInvoice = false,
+            $moreInfo = false,
+            $returnStatusOnly = true
+        );
+        
+        $mainGateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields AJAX Order ID: ' . $order_id . ' | Page Request UID: ' . $payplus_page_request_uid . ' | Response Status: ' . ($status ? $status : 'null/empty'));
+        
+        if ($status === "processing" || $status === "on-hold" || $status === "approved") {
+            $order = wc_get_order($order_id);
+            $redirect_url = $order ? $order->get_checkout_order_received_url() : '';
+            wp_send_json_success(array(
+                'status' => $status,
+                'redirect_url' => $redirect_url
+            ));
+        } else {
+            wp_send_json_success(array(
+                'status' => $status ? $status : 'pending',
+                'redirect_url' => ''
+            ));
+        }
     }
 
     public function complete_order_via_ajax()
@@ -622,7 +722,7 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
                 $transactionType = $payPlusResponse['type'];
                 $transactionUid = $payPlusResponse['transaction_uid'];
                 $isDone = $order->get_status() === "processing" ? " - Done. \n" : " - Not done. \n";
-                $this->payplus_add_log_all('hosted-fields-data', 'Order status: ' . $order->get_status() . $isDone . "\n");
+                $this->payplus_add_log_all('hosted-fields-data', "Order ($order_id) status: " . $order->get_status() . $isDone . "\n");
                 if (str_replace("wc-", "", $this->successful_order_status) !== str_replace("wc-", "", $order->get_status())) {
                     if ($status_code === "000") {
                         if ($transactionType == "Charge") {
@@ -669,9 +769,48 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
         if (isset($this->pwGiftCardData) && $this->pwGiftCardData && is_array($this->pwGiftCardData['gift_cards']) && count($this->pwGiftCardData['gift_cards']) > 0) {
             WC_PayPlus_Meta_Data::update_meta($order, ['payplus_pw_gift_cards' => wp_json_encode($this->pwGiftCardData)]);
         }
+        
+        // Double check IPN if enabled and page request UID exists
+        $payplus_instance = WC_PayPlus::get_instance();
+        $mainGateway = $payplus_instance->get_main_payplus_gateway();
+        if ($mainGateway && isset($mainGateway->enableDoubleCheckIfPruidExists) && $mainGateway->enableDoubleCheckIfPruidExists) {
+            $payplus_page_request_uid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid', true);
+            
+            if (!empty($payplus_page_request_uid)) {
+                $mainGateway->payplus_add_log_all('payplus_double_check', 'Double check IPN started for Hosted Fields Order ID: ' . $order_id . ' | Page Request UID: ' . $payplus_page_request_uid);
+                $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
+                $_wpnonce = wp_create_nonce('_wp_payplusIpn');
+                $status = $PayPlusAdminPayments->payplusIpn(
+                    $order_id,
+                    $_wpnonce,
+                    $saveToken = false,
+                    $isHostedPayment = true,
+                    $allowUpdateStatuses = true,
+                    $allowReturn = false,
+                    $getInvoice = false,
+                    $moreInfo = false,
+                    $returnStatusOnly = true
+                );
+                $mainGateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Order ID: ' . $order_id . ' | Page Request UID: ' . $payplus_page_request_uid . ' | Response Status: ' . ($status ? $status : 'null/empty'));
+                
+                if ($status === "processing" || $status === "on-hold" || $status === "approved") {
+                    $mainGateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Order ID: ' . $order_id . ' | Status approved - Payment already processed');
+                    // Payment already processed, return success with redirect to order received
+                    $redirect_to = $order->get_checkout_order_received_url();
+                    return array(
+                        'result'   => 'success',
+                        'redirect' => $redirect_to,
+                    );
+                } else {
+                    $mainGateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Order ID: ' . $order_id . ' | Status not approved (' . ($status ? $status : 'null/empty') . ') - Continuing with hosted fields payment');
+                }
+            } else {
+                $mainGateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Order ID: ' . $order_id . ' | No Page Request UID found - Skipping double check');
+            }
+        }
+        
         if ($this->id === "payplus-payment-gateway-hostedfields") {
             WC()->session->set('order_awaiting_payment', $order_id);
-            $hostedClass = new WC_PayPlus_HostedFields($order_id, $order, true, $this->pwGiftCardData);
         }
         return array(
             'result'   => 'success',
@@ -692,9 +831,14 @@ function payplus_filter_checkout_gateways($available_gateways)
 {
     // Check if it's the checkout page and not another WC endpoint
     if (function_exists('is_checkout') && is_checkout() && !is_wc_endpoint_url()) {
-        // 1. Hide POS EMV gateway unconditionally on checkout
+        // 1. Hide POS EMV gateway if "Show in Regular Checkout" is not enabled
         if (isset($available_gateways['payplus-payment-gateway-pos-emv'])) {
-            unset($available_gateways['payplus-payment-gateway-pos-emv']);
+            $pos_emv_settings = get_option('woocommerce_payplus-payment-gateway-pos-emv_settings', []);
+            $show_in_regular_checkout = isset($pos_emv_settings['show_in_regular_checkout']) && $pos_emv_settings['show_in_regular_checkout'] === 'yes';
+            
+            if (!$show_in_regular_checkout) {
+                unset($available_gateways['payplus-payment-gateway-pos-emv']);
+            }
         }
 
         // 2. Hide Main PayPlus gateway if its setting 'hide_main_pp_checkout' is 'yes'

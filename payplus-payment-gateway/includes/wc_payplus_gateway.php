@@ -64,6 +64,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     public $balance_name;
     public $successful_order_status;
     public $failure_order_status;
+    public $prevent_failed_on_ipn_error;
     public $callback_addr;
     public $allowSendCallBack;
     public $logging;
@@ -112,6 +113,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     public $isPosOverrideGateways;
     public $posOverrideGateways;
     public $pw_gift_card_auto_cancel_unpaid_order;
+    public $delete_page_request_uid_on_cancel;
 
     /**
      *
@@ -170,6 +172,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->useLegacyPayload = $this->get_option('use_legacy_payload') == 'yes' ? true : false;
         $this->updateStatusesIpn = $this->get_option('update_statuses_in_ipn') === 'yes' ? true : false;
         $this->pw_gift_card_auto_cancel_unpaid_order = $this->get_option('pw_gift_card_auto_cancel_unpaid_order') == 'yes' ? true : false;
+        $this->delete_page_request_uid_on_cancel = $this->get_option('delete_page_request_uid_on_cancel') == 'yes' ? true : false;
 
         if (wc_get_price_decimals() < ROUNDING_DECIMALS) {
             $this->rounding_decimals = wc_get_price_decimals();
@@ -211,6 +214,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->saveOrderNote = isset($this->settings['payplus_data_save_order_note']) ? boolval($this->settings['payplus_data_save_order_note'] === 'yes') : null;
         $this->successful_order_status = $this->get_option('successful_order_status');
         $this->failure_order_status = $this->get_option('failure_order_status');
+        $this->prevent_failed_on_ipn_error = $this->get_option('prevent_failed_on_ipn_error') === 'yes';
         $this->callback_addr = $this->get_option('callback_addr');
         $this->allowSendCallBack = isset($this->callback_addr) && (strpos($this->callback_addr, 'https://') === 0 || strpos($this->callback_addr, 'http://') === 0) ? true : false;
 
@@ -298,6 +302,9 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             add_action('woocommerce_scheduled_subscription_payment_' . $this->id, array($this, 'scheduled_subscription_payment'), 10, 2);
         }
 
+        // Hook to handle order status changes for deleting page request UID on cancel
+        add_action('woocommerce_order_status_changed', array($this, 'handle_order_status_change'), 10, 4);
+
         $this->invoice_api = new PayplusInvoice();
         $payplus_invoice_option = get_option('payplus_invoice_option');
         if ($payplus_invoice_option) {
@@ -322,10 +329,13 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 $devices = explode(',', $deviceUid);
 
                 foreach ($devices as $device) {
-                    list($storeId, $deviceId) = explode(':', $device);
-                    if ($cStoreId == $storeId) {
-                        $currentDevice = $deviceId;
-                        break;
+                    $deviceParts = explode(':', $device);
+                    if (count($deviceParts) >= 2) {
+                        list($storeId, $deviceId) = $deviceParts;
+                        if ($cStoreId == $storeId) {
+                            $currentDevice = $deviceId;
+                            break;
+                        }
                     }
                 }
             }
@@ -1268,7 +1278,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         echo "<h3 id='payplus-title-section'>" . esc_html($title) . "</h3>
                     <p>" . wp_kses_post($desc) . "</p>";
 
-        function hide($currentSection)
+        function payplus_hide($currentSection)
         {
             $hide = $currentSection === 'payplus-payment-gateway' ? 'hideIt' : null;
             return $hide;
@@ -1579,7 +1589,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         ));
 
         echo "<div id='settingsContainer'><div class='tab-section-payplus' id='tab-payplus-gateway' >
-                        <table class='form-table " . esc_attr(hide($currentSection)) . " fullWidth'>" . wp_kses($settings, $allowed_tags) . "</table>
+                        <table class='form-table " . esc_attr(payplus_hide($currentSection)) . " fullWidth'>" . wp_kses($settings, $allowed_tags) . "</table>
                     </div><div class='right-tab-section-payplus fullHeight hideIt'></div></div>
                     <div class='payplus-credit' style='left:20px;position: absolute; bottom: 0;'>" . wp_kses(
             $credit,
@@ -1627,7 +1637,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         }
         $html .= '</div>';
 
-        echo apply_filters('woocommerce_payment_gateway_save_new_payment_method_option_html', $html, $this); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound,WordPress.Security.EscapeOutput.OutputNotEscaped -- WooCommerce core filter; HTML is escaped in $html variable
+        echo apply_filters('woocommerce_payment_gateway_save_new_payment_method_option_html', $html, $this);
     }
 
     public function get_payment_ips()
@@ -1706,12 +1717,14 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         }
         $order->save_meta_data();
 
+        // Build redirect URL using original format (query args) for compatibility with redirect/iframe modes
         $redirect_to = add_query_arg('order-pay', $order_id, add_query_arg('key', $order->get_order_key(), get_permalink(wc_get_page_id('checkout'))));
 
         if ($this->enableDoubleCheckIfPruidExists) {
             $payplus_page_request_uid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid', true);
 
             if (!empty($payplus_page_request_uid)) {
+                $this->payplus_add_log_all('payplus_double_check', 'Double check IPN started for Order ID: ' . $order_id . ' | Page Request UID: ' . $payplus_page_request_uid);
                 $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
                 $_wpnonce = wp_create_nonce('_wp_payplusIpn');
                 $status = $PayPlusAdminPayments->payplusIpn(
@@ -1725,14 +1738,21 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     $moreInfo = false,
                     $returnStatusOnly = true
                 );
-                if ($status === "processing" || $status === "on-hold") {
-                    $redirect_to = str_replace('order-pay', 'order-received', $redirect_to);
+                $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | Page Request UID: ' . $payplus_page_request_uid . ' | Response Status: ' . ($status ? $status : 'null/empty'));
+                if ($status === "processing" || $status === "on-hold" || $status === "approved") {
+                    $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | Status approved - Redirecting to order received page');
+                    // Use WooCommerce method to get order received URL instead of string replacement
+                    $redirect_to = $order->get_checkout_order_received_url();
                     $result = [
                         'result' => 'success',
                         'redirect' => $redirect_to
                     ];
                     return $result;
+                } else {
+                    $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | Status not approved (' . ($status ? $status : 'null/empty') . ') - Continuing with payment page creation');
                 }
+            } else {
+                $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | No Page Request UID found - Skipping double check');
             }
         }
 
@@ -1745,6 +1765,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             if (!$this->checkValidateCard($token)) {
                 $this->payplus_add_log_all($handle, 'Token Expired: ' . $token, 'error');
                 wc_add_notice(__('Error: user or other, please contact PayPlus support', 'payplus-payment-gateway'), 'error');
+                // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Plugin hook with existing prefix
                 do_action('wc_gateway_payplus_process_payment_error', __('Error: user or other, please contact PayPlus support', 'payplus-payment-gateway'), $order);
                 $order->update_status('failed');
 
@@ -1762,7 +1783,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 // Translators: %s will be replaced with the error message received from the payment gateway.
                 wc_add_notice(sprintf(__('Error: Credit card declined. %s', 'payplus-payment-gateway'), $error_message), 'error');
                 // Translators: %s will be replaced with the error message received from the payment gateway.
-                do_action('wc_gateway_payplus_process_payment_error', sprintf(__('Error: Credit card declined. %s', 'payplus-payment-gateway'), $error_message), $order);
+                do_action('wc_gateway_payplus_process_payment_error', sprintf(__('Error: Credit card declined. %s', 'payplus-payment-gateway'), $error_message), $order); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Plugin hook with existing prefix
                 $order->update_status('failed');
                 $this->store_payment_ip();
                 return [
@@ -1774,7 +1795,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $this->payplus_add_log_all($handle, wp_json_encode($response), 'completed');
 
             if ($response->data->status == "approved" && $response->data->status_code == "000" && $response->data->transaction_uid) {
-                $redirect_to = str_replace('order-pay', 'order-received', $redirect_to);
+                // Use WooCommerce method to get order received URL instead of string replacement
+                $redirect_to = $order->get_checkout_order_received_url();
                 $transactionUid = $response->data->transaction_uid;
 
                 $this->updateMetaData($order_id, (array) $response->data);
@@ -1940,7 +1962,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         if ($where) {
             $sql .= " WHERE" . $where;
         }
-        $posts = $wpdb->get_results($sql); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+        // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL is built with prepared statements
+        $posts = $wpdb->get_results($sql);
 
         return $posts;
     }
@@ -2052,6 +2075,13 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         if (!empty($customerName)) {
             $customer['customer_name'] = $customerName;
         }
+
+        // Add customer_name_invoice if it exists
+        $customer_invoice_name = WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_customer_invoice_name');
+        if (!empty($customer_invoice_name)) {
+            $customer['customer_name_invoice'] = $customer_invoice_name;
+        }
+
         if ($cell_phone) {
             $customer['phone'] = $cell_phone;
         }
@@ -2068,9 +2098,20 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         if ($customer_country_iso) {
             $customer['country_iso'] = $customer_country_iso;
         }
-        if ($this->vat_number_field && $order->get_meta($this->vat_number_field)) {
+        
+        // VAT Number Priority Logic for Payment Page:
+        // 1. Customer "Other ID" field - HIGHEST PRIORITY (if customer filled this, always use it)
+        // 2. Custom vat_number_field setting (if configured in gateway settings)
+        // 3. Default _billing_vat_number - FALLBACK
+        $customer_other_id = WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_customer_other_id');
+        if (!empty($customer_other_id)) {
+            // Customer specified an alternative ID - use it (overrides all other settings)
+            $customer['vat_number'] = $customer_other_id;
+        } elseif ($this->vat_number_field && $order->get_meta($this->vat_number_field)) {
+            // Use custom vat_number field if configured
             $customer['vat_number'] = $order->get_meta($this->vat_number_field);
         }
+        
         if (intval($order->get_customer_id())) {
             $customer['customer_external_number'] = $order->get_customer_id();
         }
@@ -2533,7 +2574,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $payload['refURL_failure'] = $this->response_error_url;
         $payload['refURL_callback'] = $callback;
         $payload['charge_default'] = $this->default_charge_method;
-        $payload['paying_vat'] = $paying_vat;
+        isset($paying_vat) ? $payload['paying_vat'] = $paying_vat : $payload['paying_vat'] = true;
         $payload['customer'] = $payloadCustomer;
         !$this->send_products ? $payload['items'] = array_map('json_decode', $objectProducts->productsItems) : null;
         !empty($tokenPayload) ? $payload['token'] = $tokenPayload : null;
@@ -2692,7 +2733,26 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     wp_die(esc_html($wp_error));
                 }
             } else {
-                wc_add_notice(__('Error: The payment page failed to load - please check your page uid and domain settings.', 'payplus-payment-gateway'), 'error');
+                // Log the full response for debugging
+                $this->payplus_add_log_all($handle, 'ERROR: Payment page failed to load - $res->data not found');
+                $this->payplus_add_log_all($handle, 'Full response object: ' . wp_json_encode($res, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+                $this->payplus_add_log_all($handle, 'Response body: ' . wp_remote_retrieve_body($response));
+                $this->payplus_add_log_all($handle, 'Response code: ' . wp_remote_retrieve_response_code($response));
+
+                // Build detailed error message for display
+                $error_message = __('Error: The payment page failed to load - please check your page uid and domain settings.', 'payplus-payment-gateway');
+                $error_message .= '<br/><br/><strong>Response Details:</strong><br/>';
+                $error_message .= 'Response Code: ' . wp_remote_retrieve_response_code($response) . '<br/>';
+
+                if (isset($res->results)) {
+                    $error_message .= 'Status: ' . (isset($res->results->status) ? $res->results->status : 'N/A') . '<br/>';
+                    $error_message .= 'Message: ' . (isset($res->results->description) ? $res->results->description : 'N/A') . '<br/>';
+                }
+
+                $error_message .= '<br/><strong>Full Response:</strong><br/>';
+                $error_message .= '<pre>' . esc_html(wp_json_encode($res, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)) . '</pre>';
+
+                wc_add_notice($error_message, 'error');
 
                 return;
             }
@@ -2722,6 +2782,12 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
      */
     public function get_payment_page($res)
     {
+        // Prevent duplicate iframe creation - check if already exists
+        static $iframe_created = false;
+        if ($iframe_created) {
+            return;
+        }
+
         if (!$this->display_mode || $this->display_mode == 'default') {
             $mainPluginOptions = get_option('woocommerce_payplus-payment-gateway_settings');
             $this->display_mode = ($mainPluginOptions['display_mode'] ?: 'redirect');
@@ -2733,8 +2799,9 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         } else {
             echo "<form id='pp_iframe' name='pp_iframe' method='GET' action='" . esc_url($res) . "'></form>";
         }
-        echo '<script type="text/javascript">document.getElementById("pp_iframe").style.display = "block";</script>';
-        echo '<script type="text/javascript">document.pp_iframe.submit()</script>';
+        echo '<script type="text/javascript">(function() { var iframe = document.getElementById("pp_iframe"); if (iframe) { iframe.style.display = "block"; if (document.pp_iframe) { document.pp_iframe.submit(); } } })();</script>';
+
+        $iframe_created = true;
     }
 
 
@@ -3015,7 +3082,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     public function validateOrder($data)
     {
 
-        $handle = 'payplus_process_payment';
+        $handle = 'payplus_process_payment_validate_order';
         $order_id = trim($data['order_id']);
         $status_code = trim($data['status_code']);
         $order = wc_get_order($order_id);
@@ -3196,16 +3263,68 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 $userID = $order->get_user_id();
             }
             $insertMeta = array();
-            for ($i = 0; $i < $countLoop; $i++) {
-                $response = WC_PayPlus_Statics::payPlusRemote($this->ipn_url, $payload);
+            $maxRetries = 3; // Retry up to 3 times for network errors
+            $retryDelay = 1; // Start with 1 second delay
 
-                if (is_wp_error($response)) {
-                    $error = $response->get_error_message();
-                    $this->payplus_add_log_all($handle, wp_json_encode($error), 'error');
-                    $html = '<div style="font-weight:600;border-bottom: 1px solid #000;padding: 5px 0px">
-                    PayPlus Error <br>  ' . $error . '        </div>';
-                    $order->add_order_note($html);
-                } else {
+            for ($i = 0; $i < $countLoop; $i++) {
+                $networkErrorRetry = 0;
+                $response = null;
+
+                // Retry loop for network errors
+                while ($networkErrorRetry <= $maxRetries) {
+                    $response = WC_PayPlus_Statics::payPlusRemote($this->ipn_url, $payload);
+
+                    if (is_wp_error($response)) {
+                        $networkErrorRetry++;
+                        $error = $response->get_error_message();
+
+                        if ($networkErrorRetry <= $maxRetries) {
+                            // Log retry attempt
+                            $this->payplus_add_log_all(
+                                $handle,
+                                "Network error (attempt $networkErrorRetry/$maxRetries): " . wp_json_encode($error) . " - Retrying in {$retryDelay}s...",
+                                'warning'
+                            );
+
+                            // Wait before retry (exponential backoff)
+                            sleep($retryDelay);
+                            $retryDelay *= 2; // Double the delay for next retry
+                        } else {
+                            // Max retries reached - log final error
+                            $this->payplus_add_log_all($handle, "Network error after $maxRetries retries: " . wp_json_encode($error), 'error');
+
+                            // Add order note with retry information
+                            $html = '<div style="font-weight:600;border-bottom: 1px solid #000;padding: 5px 0px; color: #d63638;">
+                            PayPlus IPN Network Error (Failed after ' . $maxRetries . ' retries)<br>' . esc_html($error) . '<br>
+                            <em>Order marked for manual review. This order may need to be checked manually in PayPlus dashboard.</em></div>';
+                            $order->add_order_note($html);
+
+                            // Mark order for manual review
+                            WC_PayPlus_Meta_Data::update_meta($order, [
+                                'payplus_ipn_network_error' => current_time('mysql'),
+                                'payplus_needs_manual_review' => '1',
+                                'payplus_last_error' => $error
+                            ]);
+
+                            // Update order status to on-hold for manual review
+                            $order->update_status('on-hold', __('PayPlus IPN network error - requires manual verification', 'payplus-payment-gateway'));
+
+                            // IMPORTANT: Set flagPayplus to false to prevent it being marked as "failed"
+                            // Network error doesn't mean payment failed - it means we couldn't verify
+                            $flagPayplus = false;
+                            $flagProcess = false;
+                        }
+                    } else {
+                        // Success - break out of retry loop
+                        if ($networkErrorRetry > 0) {
+                            $this->payplus_add_log_all($handle, "IPN request succeeded after $networkErrorRetry retry attempts", 'info');
+                        }
+                        break;
+                    }
+                }
+
+                // Only proceed if we have a valid response
+                if (!is_wp_error($response)) {
                     $this->payplus_add_log_all('payplus_callback_secured', $order_id . ' requestPayPlusIpn->Response: ' . wp_remote_retrieve_body($response) . "\n");
                     $res = json_decode(wp_remote_retrieve_body($response));
                     $orderPayplus = $this->getOrderPayplus($order_id);
@@ -3223,8 +3342,14 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
                         $this->payplus_add_log_all($handle, 'Error IPN Error: ' . wp_json_encode($res), 'error');
                         $this->store_payment_ip();
-                        if ($this->failure_order_status !== 'default-woo') {
-                            $order->update_status($this->failure_order_status);
+                        // Only change to failed status if the setting allows it
+                        if (!$this->prevent_failed_on_ipn_error) {
+                            if ($this->failure_order_status !== 'default-woo') {
+                                $order->update_status($this->failure_order_status);
+                            }
+                        } else {
+                            // If prevented, log that we're not changing status
+                            $this->payplus_add_log_all($handle, 'IPN Error detected but status change to failed prevented by setting', 'info');
                         }
                         // Translators: %s will be replaced with the transaction UID received from the payment gateway.
                         $order->add_order_note(sprintf(__('PayPlus IPN Failed<br/>Transaction UID: %s', 'payplus-payment-gateway'), $transaction_uid));
@@ -3389,14 +3514,20 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                             break;
                         }
                     }
-                }
+                } // End of: Only proceed if we have a valid response
                 sleep(1);
             }
             WC_PayPlus_Meta_Data::update_meta($order, $insertMeta);
         }
         if ($flagPayplus) {
-            if ($this->failure_order_status !== 'default-woo') {
-                $order->update_status($this->failure_order_status);
+            // Only change to failed status if the setting allows it
+            if (!$this->prevent_failed_on_ipn_error) {
+                if ($this->failure_order_status !== 'default-woo') {
+                    $order->update_status($this->failure_order_status);
+                }
+            } else {
+                // If prevented, log that we're not changing status
+                $this->payplus_add_log_all($handle, 'Payment validation failed but status change to failed prevented by setting', 'info');
             }
             $order->add_order_note(__('PayPlus payment failed', 'payplus-payment-gateway'));
             $insertMeta = array('order_validated_error' => '1');
@@ -3714,7 +3845,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             wc_add_notice(__('There was a problem adding this card', 'payplus-payment-gateway'), 'error');
             $this->payplus_add_log_all($handle, 'IPN Error: There was a problem adding this card', 'error');
         }
-        wp_redirect(wc_get_endpoint_url('payment-methods', '', wc_get_page_permalink('myaccount')));
+        wp_safe_redirect(wc_get_endpoint_url('payment-methods', '', wc_get_page_permalink('myaccount')));
         exit;
     }
 
@@ -3740,7 +3871,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
                 $result = $this->receipt_page($order->get_id(), $token, true, 'WP_SUB_' . $order->get_id(), $amount_to_charge, false, $move_token);
 
-                if ($result->data->status == "approved" && $result->data->status_code == "000" && $result->data->transaction_uid) {
+                if ($result && isset($result->data) && isset($result->data->status) && $result->data->status == "approved" && isset($result->data->status_code) && $result->data->status_code == "000" && isset($result->data->transaction_uid) && $result->data->transaction_uid) {
                     $this->payplus_add_log_all($handle, wp_json_encode($result), 'completed');
                     $external_recurring_id = WC_PayPlus_Meta_Data::get_meta($order->get_id(), '_subscription_renewal', true);
                     $post = $this->payplus_get_posts_id($external_recurring_id);
@@ -3755,9 +3886,10 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                         $insertMeta['payplus_brand_name'] = $payplusBrandName;
                         $insertMeta['payplus_number_of_payments'] = $payplusNumberOfPayments;
                     }
+                    $transaction_number = isset($result->data->number) ? $result->data->number : '';
                     // Translators: %s will be replaced with the transaction number received from the payment gateway.
-                    $order->add_order_note(sprintf(__('PayPlus Subscription Payment Successful<br/>Transaction Number: %s', 'payplus-payment-gateway'), $result->data->number));
-                    $insertMeta['payplus_type'] = $result->data->type;
+                    $order->add_order_note(sprintf(__('PayPlus Subscription Payment Successful<br/>Transaction Number: %s', 'payplus-payment-gateway'), $transaction_number));
+                    $insertMeta['payplus_type'] = isset($result->data->type) ? $result->data->type : '';
                     $insertMeta['payplus_response'] = wp_json_encode($result->data);
                     $insertMeta['payplus_method'] = "credit-card";
                     $insertMeta['payplus_transaction_uid'] = $result->data->transaction_uid;
@@ -4062,5 +4194,57 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $dateNow = new DateTime();
         $dateNow = $dateNow->format('Y-m-d H:i:s');
         return $dateNow;
+    }
+
+    /**
+     * Handle order status changes to delete payplus_page_request_uid when order is cancelled
+     *
+     * @param int $order_id Order ID
+     * @param string $old_status Old order status
+     * @param string $new_status New order status
+     * @param WC_Order $order Order object
+     */
+    public function handle_order_status_change($order_id, $old_status, $new_status, $order)
+    {
+        // Only proceed if the status was changed manually by an admin
+        // Exclude automatic changes, AJAX requests, and REST API calls
+        if (!is_admin() || wp_doing_ajax() || (defined('REST_REQUEST') && REST_REQUEST)) {
+            return;
+        }
+
+        // Check if the new status is cancelled and the setting is enabled
+        if ($new_status === 'cancelled' && $this->delete_page_request_uid_on_cancel) {
+
+            // Only proceed if this order was processed by PayPlus gateway
+            $payment_method = $order->get_payment_method();
+            if (strpos($payment_method, 'payplus') !== false) {
+
+                // Check if payplus_page_request_uid exists before deleting
+                $page_request_uid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid', true);
+
+                if (!empty($page_request_uid)) {
+                    // Delete the meta data
+                    $order->delete_meta_data('payplus_page_request_uid');
+                    $order->save();
+
+                    // Add order note for tracking
+                    $order->add_order_note(
+                        __('PayPlus page request UID meta data deleted due to order cancellation.', 'payplus-payment-gateway')
+                    );
+
+                    // Log the action if logging is enabled
+                    if ($this->logging) {
+                        $this->payplus_add_log_all(
+                            'payplus_meta_deletion',
+                            sprintf(
+                                'Deleted payplus_page_request_uid (%s) for cancelled order %d',
+                                $page_request_uid,
+                                $order_id
+                            )
+                        );
+                    }
+                }
+            }
+        }
     }
 }

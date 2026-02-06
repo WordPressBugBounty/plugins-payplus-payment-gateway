@@ -2,9 +2,9 @@
 Contributors: payplus
 Tags: Woocommerce Payment Gateway, Credit Cards, Charges and Refunds, Subscriptions, Tokenization
 Requires at least: 6.2
-Tested up to: 6.8
+Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 7.9.2
+Stable tag: 8.0.1
 PlugIn URL: https://www.payplus.co.il/wordpress
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
@@ -86,9 +86,63 @@ If you get stuck, you can ask for help in the Plugin Forum. or contact us direct
 
 == Changelog ==
 
-== 7.9.2 - 28-09-2025 =
+== 8.0.1 - 14-01-2026 =
 
-- Added   - "Place Order" button for "PayPlus Embedded" now supports "New Blocks Checkout" in addition to classic checkout.
+- Tweak    - Order notes for IPN and cron processes are now separated for better clarity.
+- Added    - New setting to skip WooCommerce subscription renewal orders in cron service and invoice runner.
+- Tweak    - Improved PRUID validation to prevent duplicate processing after successful payment completion.
+
+== 8.0.0 - 28-12-2025 =
+
+- Added    - Custom Invoice ID field to woocommerce checkot, aloowing customers to specify a different ID for Invoice+ documents - Activated via Invoice+ setting.
+
+== 7.9.9 - 23-12-2025 =
+
+- Fix      - Resolved harmless installation warnings that appeared in debug logs for first-time users
+- Tweak    - Enhanced frontend error logging and display for payment page loading issues
+- Added    - Custom invoice name field to WooCommerce checkout, allowing customers to specify a different name for Invoice+ documents - Activated via Invoice+ settings.
+- Tweak    - Enhanced network error handling during IPN verification with automatic retry logic and better fallback behavior
+- Tweak    - Orders now marked as "on-hold" instead of "failed" when network errors occur during payment verification (configurable in Advanced Features)
+- Fix      - Resolved issue where "PayPlus Error Invoice" note was incorrectly added to cash-only payment orders when no actual error occurred
+- Fix      - Standardized background color for "Name" and "ID number" fields in PayPlus Embedded to white across all themes
+- Added    - New Advanced Features setting: "Refactor: Do not change status to failed on requestPayPlusIpn failure" - prevents orders from being marked as "failed" during IPN verification failures (enabled by default)
+- Tweak    - Improved WordPress Plugin Check (PCP) compliance by updating translator comments and nonce verifications
+- Fix      - Pruid was firing wrong notes to PayPlus Embedded orders , now fixed
+
+== 7.9.8 - 17-12-2025 =
+
+- Added    - Customer ID now displays on Invoice+ documents (supports collection from both payment page and embedded forms).
+- Tweak    - Enhanced PRUID handling for order completion.
+
+== 7.9.7 - 08-12-2025 =
+
+- Fix      - Fixed issue where pp_iframe was loading multiple times on some setups by removing unnecessary function.
+
+== 7.9.6 - 30-11-2025 =
+
+- Tweak    - PRUID: Enabled double IPN check for orders with existing payplus_page_request_uid. Now works for all payment gateways and checks for successful payments before allowing duplicate payment attempts, even if the order status wasn't previously updated.
+- Fix      - Hosted Fields (PayPlus Embedded): Fixed issue with orders created using temporary data where order_id was stored as a string instead of a numeric order number. Prevents duplicate order payments.
+- Fix      - Admin Dashboard Payments: Fixed redirect issue where payments initiated from the admin dashboard were redirecting to the customer-facing order received page. Now correctly redirects back to the admin order edit page.
+
+== 7.9.5 - 23-11-2025 =
+
+- Tweak   - Deletion of payplus_page_uid and order cancellation now only occur via manual admin action.
+- Added   - Checkbox to enable EMV positioning on Classic Checkout.
+- Added   - Checkbox to enable POS EMV positioning on Blocks Checkout.
+- Fix     - Resolved an issue in PayPlus Embedded where the customer's name could appear incorrectly.
+- Tweak   - Code improvements and updates to comply with Plugin Check (PCP) requirements.
+
+== 7.9.4 - 09-10-2025 =
+
+- Fix     - Eliminated problematic logging functionality that was causing errors for certain website users.
+
+== 7.9.3 - 08-10-2025 =
+
+- Added   - New setting to automatically remove payplus_page_request_uid HPOS meta data from cancelled orders - prevents cron from processing these orders.
+
+== 7.9.2 - 21-09-2025 =
+
+- Added   - Implemented "Place Order" button integration within PayPlus Embedded for the new block-based checkout experience, maintaining consistency with the classic checkout flow.
 
 == 7.9.1 - 16-09-2025 =
 

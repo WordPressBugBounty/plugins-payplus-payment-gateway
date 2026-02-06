@@ -17,6 +17,40 @@ jQuery(function ($) {
     $.blockUI.defaults.overlayCSS.cursor = "default";
     let hasSavedCCs = Object.keys(payplus_script_checkout.hasSavedTokens);
 
+    // Check if pp_iframe or pp_iframe_h exist on the page - hide hosted fields gateway if they don't
+    function checkAndHideHostedFieldsIfMissing() {
+        const ppIframeExists = jQuery('.pp_iframe').length > 0 || jQuery('.pp_iframe_h').length > 0 || jQuery('#pp_iframe').length > 0;
+        
+        if (!ppIframeExists) {
+            const $hostedFieldsGateway = jQuery('.payment_method_payplus-payment-gateway-hostedfields');
+            
+            if ($hostedFieldsGateway.length > 0) {
+                // If neither element exists, hide the hosted fields gateway
+                $hostedFieldsGateway.hide();
+                // Also hide the payment box if it exists
+                jQuery('.payment_box.payment_method_payplus-payment-gateway-hostedfields').hide();
+                
+                // If hosted fields was selected, switch to main PayPlus gateway
+                const $hostedInput = jQuery('input#payment_method_payplus-payment-gateway-hostedfields');
+                if ($hostedInput.is(':checked')) {
+                    jQuery('input#payment_method_payplus-payment-gateway').prop('checked', true).trigger('change');
+                }
+                // Also disable the input to prevent selection
+                $hostedInput.prop('disabled', true);
+            }
+        }
+    }
+
+    // Run check immediately and also after a short delay to catch dynamically loaded content
+    checkAndHideHostedFieldsIfMissing();
+    setTimeout(checkAndHideHostedFieldsIfMissing, 100);
+    setTimeout(checkAndHideHostedFieldsIfMissing, 500);
+    
+    // Also check when checkout is updated
+    jQuery(document.body).on('updated_checkout', function() {
+        checkAndHideHostedFieldsIfMissing();
+    });
+
     //function to hide other payment methods when subscription order
     function subscriptionOrderHide() {
         // Select all elements with the wc_payment_method class inside .wc_payment_methods.payment_methods.methods
@@ -53,6 +87,19 @@ jQuery(function ($) {
 
     function hostedFieldsSetup() {
         if (payplus_script_checkout.isHostedFields) {
+            // Check if pp_iframe or pp_iframe_h exist on the page
+            const ppIframeExists = jQuery('.pp_iframe').length > 0 || jQuery('.pp_iframe_h').length > 0;
+
+            if (!ppIframeExists) {
+                // If neither element exists, hide the hosted fields gateway
+                jQuery('.payment_method_payplus-payment-gateway-hostedfields').hide();
+                // If hosted fields was selected, switch to main PayPlus gateway
+                if (jQuery('input#payment_method_payplus-payment-gateway-hostedfields').is(':checked')) {
+                    jQuery('input#payment_method_payplus-payment-gateway').prop('checked', true).trigger('change');
+                }
+                return; // Exit if hosted fields cannot be displayed
+            }
+
             if (firstTime) {
                 firstTime = false;
                 console.log($hostedDiv.parent().attr("class"));
@@ -929,6 +976,9 @@ jQuery(function ($) {
                                         !isNaN(hostedPayload.more_info) &&
                                         typeof hostedPayload.more_info === 'number'
                                     ) {
+                                        console.log(hostedPayload.more_info);
+                                        
+                                        // Proceed with payment submission
                                         overlay();
                                         jQuery(
                                             ".blocks-payplus_loader_hosted"
@@ -1243,6 +1293,22 @@ jQuery(function ($) {
     wc_checkout_coupons.init();
     wc_checkout_login_form.init();
     wc_terms_toggle.init();
+
+    // Make pp_iframe_h clickable to select payment method
+    $(document.body).on('click touchstart', '.pp_iframe_h', function(e) {
+        // Find the parent li element that contains the payment method input
+        var $parentLi = $(this).closest('li.wc_payment_method');
+        
+        if ($parentLi.length) {
+            // Find the payment method radio input within the parent li
+            var $paymentInput = $parentLi.find('input[name="payment_method"]');
+            
+            if ($paymentInput.length && !$paymentInput.is(':checked')) {
+                // Trigger click on the radio input to select this payment method
+                $paymentInput.prop('checked', true).trigger('click');
+            }
+        }
+    });
 
     $(
         $(window).on("popstate", () => {

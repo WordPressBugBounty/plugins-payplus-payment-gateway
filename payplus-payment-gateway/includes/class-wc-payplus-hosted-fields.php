@@ -44,12 +44,19 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
             $this->pwGiftCardData = $pwGiftCardData;
         }
 
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Constants used by external hosted fields script
         define('API_KEY', $this->apiKey);
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Constants used by external hosted fields script
         define('SECRET_KEY', $this->secretKey);
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Constants used by external hosted fields script
         define('PAYMENT_PAGE_UID', $this->paymentPageUid);
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Constants used by external hosted fields script
         define('ORIGIN_DOMAIN', site_url());
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Constants used by external hosted fields script
         define('SUCCESS_URL', site_url() . '?wc-api=payplus_gateway&hostedFields=true');
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Constants used by external hosted fields script
         define('FAILURE_URL', site_url() . "/error-payment-payplus/");
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedConstantFound -- Constants used by external hosted fields script
         define('CANCEL_URL', site_url() . "/cancel-payment-payplus/");
 
         /**
@@ -81,9 +88,11 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $this->checkHostedTime() ? $hostedResponse = $this->hostedFieldsData($this->order_id) : $hostedResponse = $this->emptyResponse();
         $hostedResponse = !empty($hostedResponse) ? $hostedResponse : $hostedResponse = $this->emptyResponse();
         $hostedResponseArray = json_decode($hostedResponse, true);
-        $hostedResponseArray['results']['status'] === "error" ? $this->updateOrderId() : null;
+        if(isset($hostedResponseArray['results']['status'])){
+            $hostedResponseArray['results']['status'] === "error" ? $this->updateOrderId() : null;
+        }
 
-        if (isset($hostedResponse) && $hostedResponse && json_decode($hostedResponse, true)['results']['status'] === "success") {
+        if (isset($hostedResponse) && $hostedResponse && isset(json_decode($hostedResponse, true)['results']['status']) && json_decode($hostedResponse, true)['results']['status'] === "success") {
             $script_version = filemtime(plugin_dir_path(__DIR__) . 'assets/js/hostedFieldsScript.min.js');
             $template_path = plugin_dir_path(__DIR__) . 'templates/hostedFields.php';
 
@@ -91,6 +100,22 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
             $payPlusErrors = new WCPayPlusErrorCodes();
 
             if (file_exists($template_path)) {
+                // Force load translations before template renders
+                // We need to load early here because the template is rendered in the constructor
+                // Suppress the "too early" warning since this is intentional and necessary
+                if (!is_textdomain_loaded('payplus-payment-gateway')) {
+                    $mofile = WP_LANG_DIR . '/plugins/payplus-payment-gateway-' . determine_locale() . '.mo';
+                    if (file_exists($mofile)) {
+                        load_textdomain('payplus-payment-gateway', $mofile);
+                    } else {
+                        // Fallback to plugin's own languages directory
+                        $mofile = PAYPLUS_PLUGIN_DIR . '/languages/payplus-payment-gateway-' . determine_locale() . '.mo';
+                        if (file_exists($mofile)) {
+                            load_textdomain('payplus-payment-gateway', $mofile);
+                        }
+                    }
+                }
+                
                 wp_enqueue_style('hosted-css', PAYPLUS_PLUGIN_URL . 'assets/css/hostedFields.css', [], $script_version);
                 include $template_path;
             }
@@ -160,11 +185,57 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
                 WC()->session->set('randomHash', $order_id = bin2hex(random_bytes(16)));
                 $payload = json_decode(WC()->session->get('hostedPayload'), true);
                 $payload['more_info'] = $order_id;
-                WC()->session->set('order_awaiting_payment', $order_id);
+                // WC()->session->set('order_awaiting_payment', $order_id);
+            }
+            
+            // Double check IPN if enabled and page request UID exists (for regular checkout pages)
+            // Use session flag to prevent multiple checks for the same order in the same session
+            $session_key = 'payplus_ipn_checked_' . $order_id;
+            $already_checked = WC()->session && WC()->session->get($session_key);
+            
+            if ($order && !$already_checked && isset($this->payPlusGateway->enableDoubleCheckIfPruidExists) && $this->payPlusGateway->enableDoubleCheckIfPruidExists) {
+                $payplus_page_request_uid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid', true);
+                
+                if (!empty($payplus_page_request_uid)) {
+                    // Mark as checked in session to prevent duplicate calls
+                    if (WC()->session) {
+                        WC()->session->set($session_key, true);
+                    }
+                    
+                    $this->payPlusGateway->payplus_add_log_all('payplus_double_check', 'Double check IPN started for Hosted Fields Regular Checkout Order ID: ' . $order_id . ' | Page Request UID: ' . $payplus_page_request_uid);
+                    $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
+                    $_wpnonce = wp_create_nonce('_wp_payplusIpn');
+                    $status = $PayPlusAdminPayments->payplusIpn(
+                        $order_id,
+                        $_wpnonce,
+                        $saveToken = false,
+                        $isHostedPayment = true,
+                        $allowUpdateStatuses = true,
+                        $allowReturn = false,
+                        $getInvoice = false,
+                        $moreInfo = false,
+                        $returnStatusOnly = true
+                    );
+                    $this->payPlusGateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Regular Checkout Order ID: ' . $order_id . ' | Page Request UID: ' . $payplus_page_request_uid . ' | Response Status: ' . ($status ? $status : 'null/empty'));
+                    
+                    if ($status === "processing" || $status === "on-hold" || $status === "approved") {
+                        $this->payPlusGateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Regular Checkout Order ID: ' . $order_id . ' | Status approved - Payment already processed, redirecting');
+                        // Payment already processed, redirect to order received page
+                        $redirect_url = $order->get_checkout_order_received_url();
+                        wp_safe_redirect($redirect_url);
+                        exit;
+                    } else {
+                        $this->payPlusGateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Regular Checkout Order ID: ' . $order_id . ' | Status not approved (' . ($status ? $status : 'null/empty') . ') - Continuing with hosted fields payment page');
+                    }
+                } else {
+                    $this->payPlusGateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Regular Checkout Order ID: ' . $order_id . ' | No Page Request UID found - Skipping double check');
+                }
+            } elseif ($already_checked) {
+                $this->payPlusGateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Regular Checkout Order ID: ' . $order_id . ' | Already checked in this session - Skipping duplicate check');
             }
         }
 
-        $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", 'HostedFields-hostedFieldsData(1): (' . $order_id . ')');
+        // $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", 'HostedFields-hostedFieldsData(1): (' . $order_id . ')');
         $discountPrice = 0;
         $products = array();
         $merchantCountryCode = substr(get_option('woocommerce_default_country'), 0, 2);
@@ -294,6 +365,13 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
             $data->customer->postal_code = $customer['postal_code'];
             $data->customer->country_iso = $customer['country_iso'];
             $data->customer->customer_external_number = $order->get_customer_id();
+            
+            // Add customer_name_invoice if it exists
+            $customer_invoice_name = WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_customer_invoice_name');
+            if (!empty($customer_invoice_name)) {
+                $data->customer->customer_name_invoice = $customer_invoice_name;
+            }
+            
             $payingVat = isset($this->payPlusGateway->settings['paying_vat']) && in_array($this->payPlusGateway->settings['paying_vat'], [0, 1, 2]) ? $this->payPlusGateway->settings['paying_vat'] : false;
             if ($payingVat) {
                 $payingVat = $payingVat === "0" ? true : false;
@@ -324,9 +402,9 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $order_id = $order_id === "000" ? $this->updateOrderId($randomHash) : $order_id;
         $data->more_info = $order_id;
 
-        if ($order_id !== "000" && isset($order) && $order) {
-            WC()->session->set('order_awaiting_payment', $order_id);
-        }
+        // if ($order_id !== "000" && isset($order) && $order) {
+        //     WC()->session->set('order_awaiting_payment', $order_id);
+        // }
 
         $totalAmount = 0;
         foreach ($data->items as $item) {
@@ -342,25 +420,21 @@ class WC_PayPlus_HostedFields extends WC_PayPlus
         $payload = wp_json_encode($data, JSON_UNESCAPED_UNICODE);
         is_int($data->more_info) && $data->more_info === $order_id ? WC_PayPlus_Meta_Data::update_meta($order, ['payplus_hosted_page_request_uid' => $hostedResponseArray['payment_page_uid'], 'payplus_payload' => $payload]) : null;
 
-        $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", "HostedFields-hostedFieldsData-Class Payload: \n$payload");
+        // $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", "HostedFields-hostedFieldsData-Class Payload: \n$payload");
 
         WC()->session->set('hostedPayload', $payload);
 
         $order = wc_get_order($order_id);
         $hostedFieldsUUID = WC()->session->get('hostedFieldsUUID');
 
-        if ($order) {
-            $this->isPlaceOrder ? $this->payplus_gateway->payplus_add_log_all("hosted-fields-data", "Updating Order #:$order_id") : null;
-            $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", "HostedFields-hostedFieldsData-after update Payload: \n$payload\nhostedFieldsUUID: $hostedFieldsUUID");
-            $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload, $this->isPlaceOrder);
-        } else {
+        if(!$this->isPlaceOrder){
+            $this->payPlusGateway->payplus_add_log_all("hosted-fields-data", "Create for new Order: ($order_id) - \n$payload\nhostedFieldsUUID: $hostedFieldsUUID");
             $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload, $this->isPlaceOrder = false);
         }
 
-
         $hostedResponseArray = json_decode($hostedResponse, true);
 
-        if ($hostedResponseArray['results']['status'] === "error") {
+        if (isset($hostedResponseArray['results']['status']) && $hostedResponseArray['results']['status'] === "error") {
             WC()->session->set('page_request_uid', false);
             $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload, $this->isPlaceOrder);
         }

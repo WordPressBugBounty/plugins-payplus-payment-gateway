@@ -17,6 +17,7 @@ class WC_PayPlus_Form_Fields
      */
     public static function adminBarMenu($admin_bar)
     {
+        $payplus_payment_gateway_settings = get_option('woocommerce_payplus-payment-gateway_settings');
         $payplus_invoice_option = get_option('payplus_invoice_option');
         $showInvoiceRunnerButton = boolval(isset($payplus_invoice_option['show_invoice_runner_button']) && ($payplus_invoice_option['show_invoice_runner_button'] === 'yes' || $payplus_invoice_option['show_invoice_runner_button'] === 'on'));
 
@@ -61,7 +62,7 @@ class WC_PayPlus_Form_Fields
      */
     public static function getGateway()
     {
-        wp_redirect(admin_url('admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway'));
+        wp_safe_redirect(admin_url('admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway'));
         exit;
     }
 
@@ -802,8 +803,8 @@ class WC_PayPlus_Form_Fields
             'enable_double_check_if_pruid_exists' => [
                 'title' => __('Double check ipn', 'payplus-payment-gateway'),
                 'type' => 'checkbox',
-                'default' => 'no',
-                'label' => __('Double check ipn (Default: Unchecked)', 'payplus-payment-gateway'),
+                'default' => 'yes',
+                'label' => __('Double check ipn (Default: Checked)', 'payplus-payment-gateway'),
                 'description' => __('Before opening a payment page and if a PayPlus payment request uid already exists for this order, perform an ipn check.', 'payplus-payment-gateway'),
                 'desc_tip' => true,
             ],
@@ -812,7 +813,7 @@ class WC_PayPlus_Form_Fields
                 'type' => 'checkbox',
                 'default' => 'no',
                 'label' => __('Update statuses in ipn response (Default: Unchecked)', 'payplus-payment-gateway'),
-                'description' => __('In ipn response check status (This will run with or without the callback status update)', 'payplus-payment-gateway'),
+                'description' => __('In ipn response check status (This will prevent the callback status update)', 'payplus-payment-gateway'),
                 'desc_tip' => true,
             ],
             'use_legacy_payload' => [
@@ -831,7 +832,7 @@ class WC_PayPlus_Form_Fields
                 'title' => __('Successful Order Status', 'payplus-payment-gateway'),
                 'type' => 'select',
                 'options' => $listOrderStatus,
-                'default' => 'default-woo',
+                'default' => 'wc-processing',
             ],
             'fire_completed' => [
                 'title' => __('Payment Completed', 'payplus-payment-gateway'),
@@ -931,6 +932,14 @@ class WC_PayPlus_Form_Fields
                 'title' => __('PayPlus Advanced Features', 'payplus-payment-gateway'),
                 'type' => 'title',
             ],
+            'prevent_failed_on_ipn_error' => [
+                'title' => __('Refactor: Do not change status to failed on requestPayPlusIpn failure', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'label' => __('Enable this to prevent orders from being automatically marked as "Failed" when IPN verification fails due to network or technical errors.', 'payplus-payment-gateway'),
+                'description' => __('When enabled, orders will be placed "On-Hold" for manual review instead of being marked as failed. This prevents legitimate payments from being incorrectly marked as failed due to temporary network issues.', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+                'default' => 'yes',
+            ],
             'pw_gift_card_auto_cancel_unpaid_order' => [
                 'title' => __('Auto Cancel (PWGiftCards) Unpaid Orders', 'payplus-payment-gateway'),
                 'type' => 'checkbox',
@@ -978,6 +987,14 @@ class WC_PayPlus_Form_Fields
                 'default' => 'no',
                 'description' => __('PayPlus cron processes "cancelled" or "pending" orders that are over 30 minutes old, created today, have a payment_page_uid, and do not have the cron test flag (to avoid retesting already tested orders).
 Orders that were successful and cancelled manually will not be tested or updated via cron.', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+            ],
+            'payplus_cron_skip_subscriptions' => [
+                'title' => __('Skip subscription renewal orders in cron', 'payplus-payment-gateway'),
+                'label' => __('Skip WooCommerce subscription renewal orders when cron runs.', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'default' => 'no',
+                'description' => __('When enabled, the PayPlus cron service and invoice runner will skip subscription renewal orders. Renewal orders inherit payment information from their parent subscription, so they typically do not need to be reprocessed. The cron will still run on the initial parent subscription order.', 'payplus-payment-gateway'),
                 'desc_tip' => true,
             ],
             'payplus_orders_check_button' => [
@@ -1045,6 +1062,14 @@ Orders that were successful and cancelled manually will not be tested or updated
                 'title'   => __('Disable custom fields editing in orders', 'payplus-payment-gateway'),
                 'type'    => 'checkbox',
                 'default' => 'yes',
+            ],
+            'delete_page_request_uid_on_cancel' => [
+                'title' => __('Delete Page Request UID on Order Cancel (Only for manual change by admin)', 'payplus-payment-gateway'),
+                'label' => __('Delete payplus_page_request_uid meta when order is cancelled (Only for manual change by admin)', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'default' => 'no',
+                'description' => __('When enabled, the payplus_page_request_uid HPOS meta data will be automatically deleted when an order is cancelled.(Only for manual change by admin)', 'payplus-payment-gateway'),
+                'desc_tip' => true,
             ],
             'enable_dev_mode' => [
                 'title'   => __('Enable partners dev mode', 'payplus-payment-gateway'),

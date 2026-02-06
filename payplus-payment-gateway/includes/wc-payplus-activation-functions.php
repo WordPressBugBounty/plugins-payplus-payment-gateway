@@ -65,16 +65,16 @@ function payplus_orders_bulk_actions($redirect_to, $action, $post_ids)
     return $redirect_to;
 }
 
-function display_hash_check_notice()
+function payplus_display_hash_check_notice()
 {
     $plugin_dir = PAYPLUS_PLUGIN_DIR;
-    $integrity_check_result = verify_plugin_integrity($plugin_dir);
+    $integrity_check_result = payplus_verify_plugin_integrity($plugin_dir);
     if ($integrity_check_result !== 'All files are intact.') {
         set_transient('payplus_plugin_integrity_check_failed', $integrity_check_result);
     }
 }
 
-function verify_plugin_integrity($plugin_dir)
+function payplus_verify_plugin_integrity($plugin_dir)
 {
     $trunk_url = 'https://plugins.svn.wordpress.org/payplus-payment-gateway/tags/' . PAYPLUS_VERSION . '/';
     $hashes_file_url = $trunk_url . 'hashes.json';
@@ -133,9 +133,9 @@ add_action('payplus_cron_send_order', function () {
  * @param string $payment_id
  * @return string
  */
-add_filter('woocommerce_gateway_title', 'change_payment_gateway_title', 100, 2);
+add_filter('woocommerce_gateway_title', 'payplus_change_payment_gateway_title', 100, 2);
 
-function change_payment_gateway_title($title, $payment_id)
+function payplus_change_payment_gateway_title($title, $payment_id)
 {
     $WC_PayPlus_Gateway = new WC_PayPlus_Gateway();
     if (is_checkout() && !is_admin() && $WC_PayPlus_Gateway->enable_design_checkout && strpos($payment_id, 'payplus-payment-gateway') !== false) {
@@ -181,12 +181,12 @@ function payplusUpdateActivate()
     if (PAYPLUS_VERSION_DB != $dataBaseVersion) {
         payplus_create_table_order();
         payplus_create_table_process();
-        checkSetPayPlusOptions();
+        payplus_check_set_payplus_options();
         update_option('payplus_db_version', PAYPLUS_VERSION_DB);
     }
 }
 
-function check_if_page_exists_by_slug($page_slug)
+function payplus_check_if_page_exists_by_slug($page_slug)
 {
     $page = get_page_by_path($page_slug, OBJECT, 'page');
     $pageId = $page->ID ?? null;
@@ -200,9 +200,9 @@ function payplusGenerateErrorPage()
 {
     $page_slug = 'error-payment-payplus';
     $errorPageOptions = get_option('settings_payplus_page_error_option') ?? false;
-    $pageId = check_if_page_exists_by_slug($page_slug);
+    $pageId = payplus_check_if_page_exists_by_slug($page_slug);
     if ($pageId) {
-        checkPayPlusErrorPage($errorPageOptions);
+        payplus_check_payplus_error_page($errorPageOptions);
         update_option('error_page_payplus', $pageId);
         return;
     } else {
@@ -228,7 +228,7 @@ function payplusGenerateErrorPage()
  * 
  * @return void
  */
-function checkPayPlusErrorPage($errorPageOptions)
+function payplus_check_payplus_error_page($errorPageOptions)
 {
     $error_page_payplus = get_option('error_page_payplus') ?? false;
 
@@ -249,7 +249,7 @@ function checkPayPlusErrorPage($errorPageOptions)
  * 
  * @return void
  */
-function checkSetPayPlusOptions()
+function payplus_check_set_payplus_options()
 {
     $invoiceOptions = !is_bool(get_option('payplus_invoice_option', [])) ? get_option('payplus_invoice_option', []) : [];
     $payPlusOptions = !is_bool(get_option('woocommerce_payplus-payment-gateway_settings', [])) ? get_option('woocommerce_payplus-payment-gateway_settings', []) : [];
@@ -295,6 +295,18 @@ function checkSetPayPlusOptions()
             $savePayPlus = true;
         }
     }
+    // One-time migration: Enable enable_double_check_if_pruid_exists if unchecked (version 7.9.5)
+    $migration_flag = 'payplus_migration_enable_double_check_796';
+    if (!get_option($migration_flag)) {
+        $current_value = isset($payPlusOptions['enable_double_check_if_pruid_exists']) ? $payPlusOptions['enable_double_check_if_pruid_exists'] : 'no';
+        if ($current_value !== 'yes') {
+            $payPlusOptions['enable_double_check_if_pruid_exists'] = 'yes';
+            $savePayPlus = true;
+        }
+        // Mark migration as complete - this ensures it never runs again, even if code is left in place
+        update_option($migration_flag, true);
+    }
+
     ($savePayPlus ?? false) ? update_option('woocommerce_payplus-payment-gateway_settings', $payPlusOptions) : null;
 
     if (!array_key_exists('post-content', $payPlusErrorOptions)) {
@@ -503,6 +515,44 @@ function payplus_Add_log_payplus($last_error)
 
 add_filter('woocommerce_price_trim_zeros', '__return_true');
 add_filter('woocommerce_admin_billing_fields', 'payplus_order_admin_custom_fields');
+add_filter('woocommerce_billing_fields', 'payplus_add_custom_checkout_fields', 10, 1);
+
+function payplus_add_custom_checkout_fields($fields)
+{
+    $payplus_settings = get_option('woocommerce_payplus-payment-gateway_settings');
+    $enable_customer_invoice_name = isset($payplus_settings['enable_customer_invoice_name']) && $payplus_settings['enable_customer_invoice_name'] === 'yes';
+    $enable_customer_other_id = isset($payplus_settings['enable_customer_other_id']) && $payplus_settings['enable_customer_other_id'] === 'yes';
+    
+    // Get current language
+    $current_locale = get_locale();
+    $is_hebrew = (strpos($current_locale, 'he') === 0 || strpos($current_locale, 'iw') === 0);
+    
+    if ($enable_customer_invoice_name) {
+        // Add customer invoice name field after the company field
+        $fields['billing_customer_invoice_name'] = array(
+            'label' => $is_hebrew ? __('שם על החשבונית', 'payplus-payment-gateway') : __('Name on invoice', 'payplus-payment-gateway'),
+            'placeholder' => $is_hebrew ? __('שם לחשבונית (אופציונלי)', 'payplus-payment-gateway') : __('Name for invoice (optional)', 'payplus-payment-gateway'),
+            'required' => false,
+            'class' => array('form-row-wide'),
+            'clear' => true,
+            'priority' => 35,
+        );
+    }
+    
+    if ($enable_customer_other_id) {
+        // Add other ID field for invoice
+        $fields['billing_customer_other_id'] = array(
+            'label' => $is_hebrew ? __('מספר זהות אחר לחשבונית', 'payplus-payment-gateway') : __('Other ID for invoice', 'payplus-payment-gateway'),
+            'placeholder' => $is_hebrew ? __('מספר זהות/ח.פ אחר (אופציונלי)', 'payplus-payment-gateway') : __('Alternative ID/VAT (optional)', 'payplus-payment-gateway'),
+            'required' => false,
+            'class' => array('form-row-wide'),
+            'clear' => true,
+            'priority' => 36,
+        );
+    }
+    
+    return $fields;
+}
 
 function payplus_order_admin_custom_fields($fields)
 {
@@ -515,12 +565,36 @@ function payplus_order_admin_custom_fields($fields)
                 $sorted_fields[$key] = $values;
                 $sorted_fields['vat_number'] = array(
                     'label' => __('ID \ VAT Number', 'payplus-payment-gateway'),
-                    'value' => WC_PayPlus_Meta_Data::get_meta($theorder->get_id(), '_billing_vat_number', true),
+                    'value' => WC_PayPlus_Meta_Data::get_meta($theorder->get_id(), '_billing_vat_number'),
                     'show' => true,
                     'wrapper_class' => 'form-field-wide',
                     'position ' => 1,
                     'style' => '',
                 );
+                // Add customer invoice name field
+                $customer_invoice_name = WC_PayPlus_Meta_Data::get_meta($theorder->get_id(), '_billing_customer_invoice_name');
+                if (!empty($customer_invoice_name)) {
+                    $sorted_fields['customer_invoice_name'] = array(
+                        'label' => __('Name on Invoice', 'payplus-payment-gateway'),
+                        'value' => $customer_invoice_name,
+                        'show' => true,
+                        'wrapper_class' => 'form-field-wide',
+                        'position ' => 2,
+                        'style' => '',
+                    );
+                }
+                // Add customer other ID field
+                $customer_other_id = WC_PayPlus_Meta_Data::get_meta($theorder->get_id(), '_billing_customer_other_id');
+                if (!empty($customer_other_id)) {
+                    $sorted_fields['customer_other_id'] = array(
+                        'label' => __('Other ID for Invoice', 'payplus-payment-gateway'),
+                        'value' => $customer_other_id,
+                        'show' => true,
+                        'wrapper_class' => 'form-field-wide',
+                        'position ' => 3,
+                        'style' => '',
+                    );
+                }
             } else {
                 $sorted_fields[$key] = $values;
             }
@@ -530,12 +604,107 @@ function payplus_order_admin_custom_fields($fields)
     return $fields;
 }
 
-add_action('woocommerce_after_checkout_billing', 'add_vat_number_nonce_field');
-function add_vat_number_nonce_field()
+add_action('woocommerce_after_checkout_billing', 'payplus_add_vat_number_nonce_field');
+function payplus_add_vat_number_nonce_field()
 {
     wp_nonce_field('vat_number_nonce_action', 'vat_number_nonce');
 }
 
+add_action('woocommerce_checkout_update_order_meta', 'payplus_save_customer_invoice_name', 10, 1);
+function payplus_save_customer_invoice_name($order_id)
+{
+    $order = wc_get_order($order_id);
+    if (!$order) {
+        return;
+    }
+    
+    // Check if this is classic checkout (has POST data) or blocks checkout (no POST data)
+    // phpcs:ignore WordPress.Security.NonceVerification.Missing -- WooCommerce verifies nonce before this hook
+    $is_classic_checkout = isset($_POST['billing_customer_invoice_name']) || isset($_POST['billing_customer_other_id']);
+    
+    if ($is_classic_checkout) {
+        // CLASSIC CHECKOUT: Save from POST data
+        
+        // Save invoice name from regular checkout field
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- WooCommerce verifies nonce before this hook
+        if (isset($_POST['billing_customer_invoice_name'])) {
+            // phpcs:ignore WordPress.Security.NonceVerification.Missing -- WooCommerce verifies nonce before this hook
+            $customer_invoice_name = sanitize_text_field(wp_unslash($_POST['billing_customer_invoice_name']));
+            if (!empty($customer_invoice_name)) {
+                WC_PayPlus_Meta_Data::update_meta($order, ['_billing_customer_invoice_name' => $customer_invoice_name]);
+            } else {
+                // If field is empty, delete the meta to ensure fallback to regular name
+                WC_PayPlus_Meta_Data::delete_meta($order, '_billing_customer_invoice_name');
+            }
+        }
+        
+        // Save other ID from regular checkout field
+        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- WooCommerce verifies nonce before this hook
+        if (isset($_POST['billing_customer_other_id'])) {
+            // phpcs:ignore WordPress.Security.NonceVerification.Missing -- WooCommerce verifies nonce before this hook
+            $customer_other_id = sanitize_text_field(wp_unslash($_POST['billing_customer_other_id']));
+            if (!empty($customer_other_id)) {
+                WC_PayPlus_Meta_Data::update_meta($order, ['_billing_customer_other_id' => $customer_other_id]);
+            } else {
+                // If field is empty, delete the meta to ensure fallback to regular ID
+                WC_PayPlus_Meta_Data::delete_meta($order, '_billing_customer_other_id');
+            }
+        }
+    } else {
+        // BLOCKS CHECKOUT: Save from blocks checkout fields
+        
+        // Save invoice name from blocks checkout field
+        $blocks_field_value = $order->get_meta('_wc_other/payplus/customer-invoice-name', true);
+        if (!empty($blocks_field_value)) {
+            WC_PayPlus_Meta_Data::update_meta($order, ['_billing_customer_invoice_name' => sanitize_text_field($blocks_field_value)]);
+        } else {
+            // If field is empty, delete the meta to ensure fallback to regular name
+            WC_PayPlus_Meta_Data::delete_meta($order, '_billing_customer_invoice_name');
+        }
+        
+        // Save other ID from blocks checkout field
+        $blocks_other_id_value = $order->get_meta('_wc_other/payplus/customer-other-id', true);
+        if (!empty($blocks_other_id_value)) {
+            WC_PayPlus_Meta_Data::update_meta($order, ['_billing_customer_other_id' => sanitize_text_field($blocks_other_id_value)]);
+        } else {
+            // If field is empty, delete the meta to ensure fallback to regular ID
+            WC_PayPlus_Meta_Data::delete_meta($order, '_billing_customer_other_id');
+        }
+    }
+}
+
+// Hook to save blocks checkout field values to our unified meta keys
+add_action('woocommerce_set_additional_field_value', 'payplus_sync_blocks_checkout_fields', 10, 4);
+function payplus_sync_blocks_checkout_fields($key, $value, $group, $wc_object)
+{
+    // Check if this is our customer invoice name field
+    if ($key === 'payplus/customer-invoice-name') {
+        // If it's an order object, save to our unified meta key
+        if (is_a($wc_object, 'WC_Order')) {
+            if (!empty($value)) {
+                // Use the PayPlus meta data handler to ensure compatibility with both HPOS and classic
+                WC_PayPlus_Meta_Data::update_meta($wc_object, ['_billing_customer_invoice_name' => sanitize_text_field($value)]);
+            } else {
+                // If field is empty, delete the meta to ensure fallback to regular name
+                WC_PayPlus_Meta_Data::delete_meta($wc_object, '_billing_customer_invoice_name');
+            }
+        }
+    }
+    
+    // Check if this is our customer other ID field
+    if ($key === 'payplus/customer-other-id') {
+        // If it's an order object, save to our unified meta key
+        if (is_a($wc_object, 'WC_Order')) {
+            if (!empty($value)) {
+                // Use the PayPlus meta data handler to ensure compatibility with both HPOS and classic
+                WC_PayPlus_Meta_Data::update_meta($wc_object, ['_billing_customer_other_id' => sanitize_text_field($value)]);
+            } else {
+                // If field is empty, delete the meta to ensure fallback to regular ID
+                WC_PayPlus_Meta_Data::delete_meta($wc_object, '_billing_customer_other_id');
+            }
+        }
+    }
+}
 
 add_action('woocommerce_process_shop_order_meta', 'payplus_checkout_field_update_order_meta', 10,);
 function payplus_checkout_field_update_order_meta($order_id)

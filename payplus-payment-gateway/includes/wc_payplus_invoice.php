@@ -253,7 +253,14 @@ class PayplusInvoice
         $postal_code = str_replace(["'", '"', "\\"], '', $order->get_billing_postcode());
         $customer_country_iso = $order->get_billing_country();
         $customerName = "";
-        $vat_number = WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_vat_number', true);
+        
+        // VAT Number Priority Logic:
+        // 1. Customer "Other ID" field (_billing_customer_other_id) - HIGHEST PRIORITY (overrides everything)
+        // 2. Payment response identification_number (if display_customer_id_in_invoice setting is enabled)
+        // 3. Regular VAT number field (_billing_vat_number) - FALLBACK
+        $customer_other_id = WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_customer_other_id');
+        $vat_number = !empty($customer_other_id) ? $customer_other_id : WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_vat_number');
+        
         $company = $order->get_billing_company();
 
         if ($WC_PayPlus_Gateway->exist_company && !empty($company)) {
@@ -268,6 +275,13 @@ class PayplusInvoice
                 $customerName .= " (" . $company . ")";
             }
         }
+        
+        // Check if customer invoice name exists and use it
+        $customer_invoice_name = WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_customer_invoice_name');
+        if (!empty($customer_invoice_name)) {
+            $customerName = $customer_invoice_name;
+        }
+        
         if (empty($customerName)) {
             $customer['name'] = __("General Customer - לקוח כללי", 'payplus-payment-gateway');
         } else {
@@ -423,6 +437,13 @@ class PayplusInvoice
                 if (!empty($found_in_other) || !empty($found_in_or_other)) {
                     $method_payment = 'paypal';
                 }
+                
+                // Validate donation receipt cannot have 'other' payment method
+                if ($payplus_invoice_type_document_refund === 'inv_don_receipt' && $method_payment === 'other') {
+                    $order->add_order_note(__('Invoice not created: Donation invoice-receipts cannot have "Other" as the payment method. Please select a different payment method.', 'payplus-payment-gateway'));
+                    throw new Exception(esc_html__('Donation invoice-receipts cannot have "Other" as the payment method. Please select a different payment method.', 'payplus-payment-gateway'));
+                }
+                
                 $objectInvoicePaymentNoPayplus = array('method_payment' => $method_payment, 'price' => ($dual * $sum) * 100);
                 $objectInvoicePaymentNoPayplus = (object) $objectInvoicePaymentNoPayplus;
                 $resultApps[] = $objectInvoicePaymentNoPayplus;
@@ -989,7 +1010,8 @@ class PayplusInvoice
 
             $sql .= implode(' OR ', $clauses) . ")";
 
-            $resultApps = $wpdb->get_results($sql, OBJECT); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL is built with prepared statements for each clause
+            $resultApps = $wpdb->get_results($sql, OBJECT);
             $resultApps = $this->payplus_set_object_payment($order_id, $resultApps);
         }
         return $resultApps;
@@ -1092,6 +1114,17 @@ class PayplusInvoice
                     $dual = 1;
                     $resultApps = $this->payplus_get_payments($order_id);
 
+                    // Validate donation receipt cannot have 'other' payment method
+                    if ($payplus_document_type === 'inv_don_receipt') {
+                        foreach ($resultApps as $payment) {
+                            if (isset($payment->method_payment) && $payment->method_payment === 'other') {
+                                $order->add_order_note(__('Invoice not created: Donation invoice-receipts cannot have "Other" as the payment method. Please select a different payment method.', 'payplus-payment-gateway'));
+                                $WC_PayPlus_Gateway->payplus_add_log_all($handle, "Order {$order_id}: Donation invoice-receipt creation blocked - payment method is 'other'", 'error');
+                                return;
+                            }
+                        }
+                    }
+
                     if ($payplus_document_type === "inv_refund_receipt") {
                         $dual = -1;
                         $payplus_document_type = "inv_receipt";
@@ -1101,6 +1134,23 @@ class PayplusInvoice
                     $date = $date->format('m-d-Y H:i');
                     $order = wc_get_order($order_id);
                     $payload['customer'] = $this->payplus_get_client_by_order_id($order_id);
+                    $ppResJson = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response');
+                    $payPlusResponse = !empty($ppResJson) ? json_decode($ppResJson, true) : null;
+                    
+                    // VAT Number Override Logic:
+                    // If customer filled "Other ID" field, it has HIGHEST priority and should NEVER be overridden
+                    // Only apply display_customer_id_in_invoice setting if Other ID is empty
+                    $customer_other_id = WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_customer_other_id');
+                    $has_other_id = !empty($customer_other_id);
+                    
+                    // Apply identification_number ONLY if:
+                    // 1. Customer did NOT specify an Other ID (customer's choice takes priority)
+                    // 2. AND display_customer_id_in_invoice setting is enabled
+                    // 3. AND identification_number exists in payment response
+                    $display_customer_id = isset($this->payplus_invoice_option['display_customer_id_in_invoice']) && ($this->payplus_invoice_option['display_customer_id_in_invoice'] === 'yes' || $this->payplus_invoice_option['display_customer_id_in_invoice'] === 'on');
+                    if (!$has_other_id && $display_customer_id && isset($payPlusResponse['identification_number']) && !empty($payPlusResponse['identification_number'])) {
+                        $payload['customer']['vat_number'] = $payPlusResponse['identification_number'];
+                    }
                     $payload['customer']['country_iso'] === "IL" && boolval($WC_PayPlus_Gateway->settings['paying_vat_all_order'] === "yes") ? $payload['customer']['paying_vat'] = true : null;
                     if ($WC_PayPlus_Gateway->settings['allways_pay_vat'] === "yes") {
                         $payload['customer']['paying_vat'] = true;
@@ -1230,6 +1280,14 @@ class PayplusInvoice
                             if (!empty($found_in_other) || !empty($found_in_or_other)) {
                                 $method_payment = 'paypal';
                             }
+                            
+                            // Validate donation receipt cannot have 'other' payment method
+                            if ($payplus_document_type === 'inv_don_receipt' && $method_payment === 'other') {
+                                $order->add_order_note(__('Invoice not created: Donation invoice-receipts cannot have "Other" as the payment method. Please select a different payment method.', 'payplus-payment-gateway'));
+                                $WC_PayPlus_Gateway->payplus_add_log_all($handle, "Order {$order_id}: Donation invoice-receipt creation blocked - payment method is 'other'", 'error');
+                                return;
+                            }
+                            
                             if (
                                 isset($this->payplus_invoice_option['do-not-create']) && in_array($method_payment, $this->payplus_invoice_option['do-not-create']) ||
                                 isset($this->payplus_invoice_option['do-not-create']) && in_array($order->get_payment_method(), $this->payplus_invoice_option['do-not-create'])
@@ -1262,9 +1320,6 @@ class PayplusInvoice
                     $payplusApprovalNumPaypl = $order->get_transaction_id();
                     $payplusApprovalNum = ($payplusApprovalNum) ? $payplusApprovalNum : $payplusApprovalNumPaypl;
                     $payload = array_merge($payload, $this->payplus_get_payments_invoice($resultApps, $payplusApprovalNum, $dual, $order->get_total()));
-
-                    $ppResJson = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response');
-                    $payPlusResponse = !empty($ppResJson) ? json_decode($ppResJson, true) : null;
 
                     if (isset($payload['payments'][0]['payment_app']) && $payload['payments'][0]['payment_app'] === "-1") {
                         if (is_array($payPlusResponse)) {
@@ -1382,9 +1437,13 @@ class PayplusInvoice
                              <a class="link-invoice" target="_blank" href="' . $res->details->originalDocAddress . '">' . __('Link Document  ', 'payplus-payment-gateway') . '</a>');
                             }
                         } else {
-                            WC_PayPlus_Meta_Data::update_meta($order, array('payplus_error_invoice' => $res->error));
-                            $order->add_order_note('<div style="font-weight:600">PayPlus Error Invoice</div>' . $res->error);
-                            $WC_PayPlus_Gateway->payplus_add_log_all($handle, wp_json_encode($res), 'error');
+                            // Only log and add notes if we actually have a response with error data
+                            if (!empty($response)) {
+                                WC_PayPlus_Meta_Data::update_meta($order, array('payplus_error_invoice' => $response));
+                                $order->add_order_note('<div style="font-weight:600">PayPlus Error Invoice</div>' . $res->error);
+                                $WC_PayPlus_Gateway->payplus_add_log_all($handle, wp_json_encode($res), 'error');
+                            }
+                            // If response is empty/null, do nothing - might be OK or will retry later
                         }
                     }
                 }
