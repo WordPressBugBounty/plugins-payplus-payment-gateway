@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.0.2
+ * Version: 8.0.3
  * Tested up to: 6.9
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.0.2');
-define('PAYPLUS_VERSION_DB', 'payplus_8_0_2');
+define('PAYPLUS_VERSION', '8.0.3');
+define('PAYPLUS_VERSION_DB', 'payplus_8_0_3');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -98,7 +98,7 @@ class WC_PayPlus
         add_action('woocommerce_init', [$this, 'pwgc_remove_processing_redemption'], 11);
         add_action('woocommerce_checkout_order_processed', [$this, 'payplus_checkout_order_processed'], 25, 3);
         add_action('woocommerce_thankyou', [$this, 'payplus_clear_session_on_order_received'], 10, 1);
-
+        add_action('wp_footer', [$this, 'payplus_thankyou_iframe_redirect_script'], 5);
 
         //FILTER
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), [$this, 'plugin_action_links']);
@@ -284,6 +284,19 @@ class WC_PayPlus
         if (WC()->session) {
             WC()->session->__unset('page_order_awaiting_payment');
         }
+    }
+
+    /**
+     * When thank-you page is loaded inside the PayPlus payment iframe (e.g. Firefox blocks
+     * iframe from navigating top), tell the parent to redirect so the top window goes to thank-you.
+     */
+    public function payplus_thankyou_iframe_redirect_script()
+    {
+        if (!function_exists('is_wc_endpoint_url') || !is_wc_endpoint_url('order-received')) {
+            return;
+        }
+        // Only output when we're on order-received; parent will redirect when it receives this message.
+        echo "<script>(function(){if(window.self!==window.top){window.top.postMessage({type:'payplus_redirect',url:window.location.href},'*');}})();</script>\n";
     }
 
     /**
