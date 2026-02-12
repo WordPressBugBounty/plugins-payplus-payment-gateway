@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.0.3
+ * Version: 8.0.4
  * Tested up to: 6.9
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.0.3');
-define('PAYPLUS_VERSION_DB', 'payplus_8_0_3');
+define('PAYPLUS_VERSION', '8.0.4');
+define('PAYPLUS_VERSION_DB', 'payplus_8_0_4');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -1465,7 +1465,7 @@ class WC_PayPlus
 
                 if (is_checkout() || is_product()) {
                     if ($this->importApplePayScript && !wp_script_is('applePayScript', 'enqueued') && !$this->is_block_based_checkout()) {
-                        wp_register_script('applePayScript', PAYPLUS_PLUGIN_URL . 'assets/js/script.js', array('jquery'), PAYPLUS_VERSION, true);
+                        wp_register_script('applePayScript', PAYPLUS_PLUGIN_URL . 'assets/js/scriptV2.js', array('jquery'), PAYPLUS_VERSION, true);
                         wp_enqueue_script('applePayScript');
                     }
                 }
@@ -1481,7 +1481,7 @@ class WC_PayPlus
                     wp_scripts()->registered['wc-checkout']->src = PAYPLUS_PLUGIN_URL . 'assets/js/checkout.min.js?ver=3' . PAYPLUS_VERSION;
                     if ($this->isApplePayGateWayEnabled || $this->isApplePayExpressEnabled) {
                         if (in_array($this->payplus_payment_gateway_settings->display_mode, ['samePageIframe', 'popupIframe', 'iframe'])) {
-                            $importAapplepayScript = PAYPLUS_PLUGIN_URL . 'assets/js/script.js' . '?ver=' . PAYPLUS_VERSION;
+                            $importAapplepayScript = PAYPLUS_PLUGIN_URL . 'assets/js/scriptV2.js' . '?ver=' . PAYPLUS_VERSION;
                         }
                     }
                     $this->payplus_gateway = $this->get_main_payplus_gateway();
@@ -1504,7 +1504,7 @@ class WC_PayPlus
                             "hostedFieldsWidth" => isset($this->hostedFieldsOptions['hosted_fields_width']) ? $this->hostedFieldsOptions['hosted_fields_width'] : 100,
                             "hidePPGateway" => isset($this->hostedFieldsOptions['hide_payplus_gateway']) ? boolval($this->hostedFieldsOptions['hide_payplus_gateway'] === "yes") : false,
                             "hidePayPlusGatewayNMW" => $this->hidePayPlusGatewayNMW,
-                            "hostedFieldsIsMain" => isset($this->hostedFieldsOptions['hosted_fields_is_main']) ? boolval($this->hostedFieldsOptions['hosted_fields_is_main'] === "yes") : false,
+                            "hostedFieldsIsMain" => (isset($this->hostedFieldsOptions['enabled']) && $this->hostedFieldsOptions['enabled'] === "yes" && isset($this->hostedFieldsOptions['hosted_fields_is_main']) && $this->hostedFieldsOptions['hosted_fields_is_main'] === "yes"),
                             "saveCreditCard" => __("Save credit card in my account", "payplus-payment-gateway"),
                             "isSavingCerditCards" => boolval(property_exists($this->payplus_payment_gateway_settings, 'create_pp_token') && $this->payplus_payment_gateway_settings->create_pp_token === 'yes'),
                             "enableDoubleCheckIfPruidExists" => isset($this->payplus_gateway) && $this->payplus_gateway->enableDoubleCheckIfPruidExists ? true : false,
