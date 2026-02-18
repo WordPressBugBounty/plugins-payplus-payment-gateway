@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [8.0.6]  - 18-02-2026 - (Bliss)
+## [8.0.7]  - 18-02-2026 - (Bliss+)
 
 - Tweak     - Added automatic polling fallback for iframe payment redirects in both blocks and classic checkouts. This ensures reliable redirects for Firefox users and other scenarios where the iframe cannot communicate via postMessage. The system polls the server for order completion status and redirects to the thank-you page automatically.
 - Fix       - Fixed EMV POS device functionality issue when only one admin user was configured.
