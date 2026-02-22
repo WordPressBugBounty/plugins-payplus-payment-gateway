@@ -772,6 +772,13 @@ class WC_PayPlus_Form_Fields
                 'desc_tip' => true,
                 'default' => 'no',
             ],
+            'popup_tv_effect' => [
+                'title' => __('TV Power Down Effect (Popup Only)', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'description' => __('Show a TV power-down animation when closing the popup iframe after successful payment. Only applies to popup iframe mode.', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+                'default' => 'no',
+            ],
             'hide_identification_id' => [
                 'title' => __('Hide ID Field In Payment Page', 'payplus-payment-gateway'),
                 'type' => 'select',
@@ -1097,14 +1104,6 @@ Orders that were successful and cancelled manually will not be tested or updated
                 'label' => __('Log debug messages', 'payplus-payment-gateway'),
                 'default' => 'yes',
                 'custom_attributes' => array('disabled' => 'disabled'),
-            ],
-            'iframe_redirect_legacy' => [
-                'title' => __('Iframe redirect — legacy mode', 'payplus-payment-gateway'),
-                'type' => 'checkbox',
-                'label' => __('Use direct redirect from iframe (may require Firefox permission)', 'payplus-payment-gateway'),
-                'default' => 'yes',
-                'desc_tip' => true,
-                'description' => __('When checked, the payment iframe redirects the browser directly (the old method). Firefox users may see a "prevented redirect" prompt they need to allow. When unchecked (default), the checkout page detects payment completion via server polling and redirects automatically — no browser prompt needed.', 'payplus-payment-gateway'),
             ],
             'pos_override' => [
                 'title' => __('POS Override', 'payplus-payment-gateway'),

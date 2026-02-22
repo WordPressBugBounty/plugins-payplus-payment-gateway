@@ -331,6 +331,12 @@ body #applePayButton {
 .express-checkout p {
     margin: 0px;
 }
+
+/* Smooth fade transitions for payment boxes */
+.payment_box {
+    transition: opacity 0.2s ease-in-out;
+}
+
 @media screen and (min-width: 568px) {
     body .alertify .ajs-dialog {
         height: 82% !important;
@@ -347,6 +353,113 @@ body #applePayButton {
             top: 0 !important;
         }
     }
+}
+
+/* TV Power Down Effect for Popup Iframe - Classic CRT Style */
+
+/* Animation for classic checkout (no centering transform needed) */
+@keyframes tvPowerDownClassic {
+    0% {
+        transform: scaleY(1) scaleX(1);
+        opacity: 1;
+        filter: brightness(1.2);
+    }
+    /* Top and bottom collapse to center - horizontal line */
+    50% {
+        transform: scaleY(0.01) scaleX(1);
+        opacity: 1;
+        filter: brightness(1.5);
+    }
+    /* Left and right collapse to center - dot */
+    90% {
+        transform: scaleY(0.01) scaleX(0.01);
+        opacity: 1;
+        filter: brightness(2);
+    }
+    /* Dot fades to black */
+    100% {
+        transform: scaleY(0) scaleX(0);
+        opacity: 0;
+        filter: brightness(0);
+    }
+}
+
+/* Animation for blocks checkout popup (preserve centering transform) */
+@keyframes tvPowerDownBlocks {
+    0% {
+        transform: translate(-50%, -50%) scaleY(1) scaleX(1);
+        opacity: 1;
+        filter: brightness(1.2);
+    }
+    /* Top and bottom collapse to center - horizontal line */
+    50% {
+        transform: translate(-50%, -50%) scaleY(0.01) scaleX(1);
+        opacity: 1;
+        filter: brightness(1.5);
+    }
+    /* Left and right collapse to center - dot */
+    90% {
+        transform: translate(-50%, -50%) scaleY(0.01) scaleX(0.01);
+        opacity: 1;
+        filter: brightness(2);
+    }
+    /* Dot fades to black */
+    100% {
+        transform: translate(-50%, -50%) scaleY(0) scaleX(0);
+        opacity: 0;
+        filter: brightness(0);
+    }
+}
+
+/* Animation for blocks checkout same-page iframe (relative positioning, no translate) */
+@keyframes tvPowerDownBlocksSamePage {
+    0% {
+        transform: scaleY(1) scaleX(1);
+        opacity: 1;
+        filter: brightness(1.2);
+    }
+    /* Top and bottom collapse to center - horizontal line */
+    50% {
+        transform: scaleY(0.01) scaleX(1);
+        opacity: 1;
+        filter: brightness(1.5);
+    }
+    /* Left and right collapse to center - dot */
+    90% {
+        transform: scaleY(0.01) scaleX(0.01);
+        opacity: 1;
+        filter: brightness(2);
+    }
+    /* Dot fades to black */
+    100% {
+        transform: scaleY(0) scaleX(0);
+        opacity: 0;
+        filter: brightness(0);
+    }
+}
+
+/* Apply animation to the alertify dialog (classic checkout) */
+.alertify.tv-closing .ajs-dialog {
+    animation: tvPowerDownClassic 1s ease-out forwards;
+    transform-origin: center center;
+}
+
+/* Full-page overlay background darkening (classic checkout) */
+.alertify.tv-closing {
+    background: rgba(0, 0, 0, 0.98) !important;
+    transition: background 1s ease-in;
+}
+
+/* Apply animation to .pp_iframe container (blocks checkout popup - fixed positioning) */
+.pp_iframe.tv-closing-blocks {
+    animation: tvPowerDownBlocks 1s ease-out forwards;
+    transform-origin: center center;
+}
+
+/* Apply animation to .pp_iframe container (blocks checkout same-page - relative positioning) */
+.pp_iframe.tv-closing-blocks-samepage {
+    animation: tvPowerDownBlocksSamePage 1s ease-out forwards;
+    transform-origin: center center;
 }
 
 /*# sourceMappingURL=style.css.map */

@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.0.9
+ * Version: 8.1.0
  * Tested up to: 6.9
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.0.9');
-define('PAYPLUS_VERSION_DB', 'payplus_8_0_8');
+define('PAYPLUS_VERSION', '8.1.0');
+define('PAYPLUS_VERSION_DB', 'payplus_8_1_0');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -44,6 +44,7 @@ class WC_PayPlus
     public $hidePayPlusGatewayNMW;
     public $pwGiftCardData;
     public $iframeAutoHeight;
+    public $popupTvEffect;
 
     /**
      * The main PayPlus gateway instance. Use get_main_payplus_gateway() to access it.
@@ -73,6 +74,7 @@ class WC_PayPlus
         $this->secret_key = $is_test_mode ? ($this->payplus_payment_gateway_settings->dev_secret_key ?? null) : ($this->payplus_payment_gateway_settings->secret_key ?? null);
         $this->hidePayPlusGatewayNMW = boolval(property_exists($this->payplus_payment_gateway_settings, 'hide_main_pp_checkout') && $this->payplus_payment_gateway_settings->hide_main_pp_checkout === 'yes');
         $this->iframeAutoHeight = boolval(property_exists($this->payplus_payment_gateway_settings, 'iframe_auto_height') && $this->payplus_payment_gateway_settings->iframe_auto_height === 'yes');
+        $this->popupTvEffect = boolval(property_exists($this->payplus_payment_gateway_settings, 'popup_tv_effect') && $this->payplus_payment_gateway_settings->popup_tv_effect === 'yes');
 
         add_action('plugins_loaded', [$this, 'load_textdomain'], 0); // Load first for gateway settings
         add_action('admin_init', [$this, 'check_environment']);
@@ -284,9 +286,12 @@ class WC_PayPlus
             WC()->cart->empty_cart();
         }
 
-        // Unset page_order_awaiting_payment since payment is complete
+        // Unset both our custom session key and WC's own order_awaiting_payment.
+        // WC's get_cart_from_session() restores cart items from a pending order when
+        // order_awaiting_payment is still set — clearing it stops that re-hydration.
         if (WC()->session) {
             WC()->session->__unset('page_order_awaiting_payment');
+            WC()->session->__unset('order_awaiting_payment');
         }
     }
 
@@ -1059,6 +1064,11 @@ class WC_PayPlus
                     }
                 }
                 WC()->session->__unset('save_payment_method');
+                WC()->session->__unset('order_awaiting_payment');
+                WC()->session->__unset('page_order_awaiting_payment');
+                if (WC()->cart) {
+                    WC()->cart->empty_cart();
+                }
                 $this->payplus_redirect_graceful($linkRedirect);
             } else {
                 $countProcess = intval($result->count_process);
@@ -1091,6 +1101,11 @@ class WC_PayPlus
                 }
 
                 WC()->session->__unset('save_payment_method');
+                WC()->session->__unset('order_awaiting_payment');
+                WC()->session->__unset('page_order_awaiting_payment');
+                if (WC()->cart) {
+                    WC()->cart->empty_cart();
+                }
                 $this->payplus_redirect_graceful($linkRedirect);
             }
         } elseif (
@@ -1102,6 +1117,11 @@ class WC_PayPlus
             if ($order) {
                 $linkRedirect = html_entity_decode(esc_url($this->payplus_gateway->get_return_url($order)));
                 WC()->session->__unset('save_payment_method');
+                WC()->session->__unset('order_awaiting_payment');
+                WC()->session->__unset('page_order_awaiting_payment');
+                if (WC()->cart) {
+                    WC()->cart->empty_cart();
+                }
                 $this->payplus_redirect_graceful($linkRedirect);
             }
         }
@@ -1141,52 +1161,89 @@ class WC_PayPlus
     }
 
     /**
-     * Graceful redirect that works inside iframes (Firefox-safe).
+     * Redirect to thank-you page in a way that works for both iframe and top-window contexts.
      *
-     * DEFAULT (new method — iframe_redirect_legacy = no):
-     *   When running inside an iframe, outputs a tiny HTML page that sends
-     *   postMessage to the parent with the redirect URL. The parent checkout
-     *   page picks it up and redirects, or the polling fallback catches it.
-     *   No Firefox "prevented redirect" prompt.
+     * IFRAME context (Sec-Fetch-Dest: iframe/frame/embed):
+     *   Outputs a minimal HTML page that sends postMessage({type:'payplus_redirect', url})
+     *   to the parent window. The parent checkout JS picks it up and redirects the top
+     *   window to the thank-you URL. The IPN/callback URL is never visible in the address bar.
      *
-     * LEGACY (iframe_redirect_legacy = yes):
-     *   Uses wp_safe_redirect directly — the old behaviour. Firefox may show
-     *   a "prevented redirect" prompt that the user must allow.
+     * TOP-WINDOW context (direct visit, Sec-Fetch-Dest: document/navigate/empty):
+     *   Issues an immediate 302 to the thank-you URL so the IPN/callback URL is never
+     *   the final URL in the browser address bar.
      *
-     * When running in the top window (direct visit), both modes do a normal redirect.
-     *
-     * @param string $url The URL to redirect to.
+     * @param string $url The thank-you URL to redirect to.
      */
     private function payplus_redirect_graceful($url)
     {
-        // Check if legacy (old) redirect mode is enabled in plugin settings
-        $use_legacy = property_exists($this->payplus_payment_gateway_settings, 'iframe_redirect_legacy')
-            && $this->payplus_payment_gateway_settings->iframe_redirect_legacy === 'yes';
+        $url = esc_url($url);
 
-        if ($use_legacy) {
-            // Old method: direct wp_safe_redirect (Firefox may prompt to allow)
+        // Detect request context via Sec-Fetch-Dest (Chrome 80+, Firefox 90+, Safari 17+).
+        $fetch_dest = isset($_SERVER['HTTP_SEC_FETCH_DEST'])
+            ? strtolower(sanitize_text_field(wp_unslash($_SERVER['HTTP_SEC_FETCH_DEST'])))
+            : '';
+
+        // Server-to-server IPN: no browser, no Accept: text/html — skip silently.
+        $accept     = isset($_SERVER['HTTP_ACCEPT']) ? $_SERVER['HTTP_ACCEPT'] : '';
+        $is_browser = (strpos($accept, 'text/html') !== false)
+            || in_array($fetch_dest, ['iframe', 'frame', 'embed', 'document', 'navigate', ''], true);
+        if (!$is_browser) {
+            return;
+        }
+
+        // TOP-WINDOW request (redirect mode, or iframe mode after allow-top-navigation fires):
+        // Issue an instant 302 — no HTML rendered, no spinner flash, clean URL immediately.
+        $is_iframe = in_array($fetch_dest, ['iframe', 'frame', 'embed'], true);
+        if (!$is_iframe) {
             wp_safe_redirect($url);
             exit;
         }
 
-        // New method: postMessage to parent + polling fallback
-        $url = esc_url($url);
+        // IFRAME request (edge case: PayPlus navigated the iframe itself to the callback URL).
+        // Send postMessage to the parent so it can redirect the top window cleanly.
+        // The spinner is shown as a brief visual while the parent processes the message.
         nocache_headers();
         header('Content-Type: text/html; charset=utf-8');
-        echo '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>';
-        echo '<script>(function(){';
-        echo 'var u=' . wp_json_encode($url) . ';';
-        // If we are inside an iframe, send postMessage to parent and show message.
-        // The parent will handle the actual redirect.
-        echo 'if(window.self!==window.top){';
-        echo 'try{window.parent.postMessage({type:"payplus_redirect",url:u},window.location.origin);}catch(e){}';
-        echo 'document.body.innerText="' . esc_js(__('Payment received — redirecting…', 'payplus-payment-gateway')) . '";';
-        echo '}else{';
-        // Top window — just redirect normally.
-        echo 'window.location.href=u;';
-        echo '}';
-        echo '})();</script>';
-        echo '</body></html>';
+        $msg      = esc_html(__('Payment received — redirecting…', 'payplus-payment-gateway'));
+        $json_url = wp_json_encode($url);
+        $dir      = is_rtl() ? 'rtl' : 'ltr';
+        $lang     = esc_attr(get_bloginfo('language'));
+        echo '<!DOCTYPE html>
+<html lang="' . $lang . '" dir="' . $dir . '">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;width:100%}
+body{
+  display:flex;align-items:center;justify-content:center;
+  flex-direction:column;gap:24px;
+  background:#fff;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Oxygen,sans-serif;
+  text-align:center;padding:20px;
+}
+.pp-msg{font-size:clamp(15px,4vw,20px);font-weight:500;color:#333;letter-spacing:.01em}
+.pp-spinner{
+  width:44px;height:44px;
+  border:4px solid #e0e0e0;
+  border-top-color:#2563eb;
+  border-radius:50%;
+  animation:pp-spin .8s linear infinite;
+}
+@keyframes pp-spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<p class="pp-msg">' . $msg . '</p>
+<div class="pp-spinner"></div>
+<script>(function(){
+  var u=' . $json_url . ';
+  try{window.parent.postMessage({type:"payplus_redirect",url:u},"*");}catch(e){}
+  if(window.self===window.top){window.location.href=u;}
+})();</script>
+</body>
+</html>';
         exit;
     }
 
@@ -1581,6 +1638,8 @@ class WC_PayPlus
                             'frontNonce' => wp_create_nonce('frontNonce'),
                             "isSubscriptionOrder" => $isSubscriptionOrder,
                             "iframeAutoHeight" => $this->iframeAutoHeight,
+                            "popupTvEffect" => $this->popupTvEffect,
+                            "viewMode" => $this->payplus_payment_gateway_settings->display_mode ?? 'redirect',
                             "iframeWidth" => $this->payplus_payment_gateway_settings->iframe_width ?? '40%',
                             "hasSavedTokens" => WC_Payment_Tokens::get_customer_tokens(get_current_user_id()),
                             "isHostedFields" => isset($this->hostedFieldsOptions['enabled']) ? boolval($this->hostedFieldsOptions['enabled'] === "yes") : false,
@@ -1592,7 +1651,6 @@ class WC_PayPlus
                             "isSavingCerditCards" => boolval(property_exists($this->payplus_payment_gateway_settings, 'create_pp_token') && $this->payplus_payment_gateway_settings->create_pp_token === 'yes'),
                             "enableDoubleCheckIfPruidExists" => isset($this->payplus_gateway) && $this->payplus_gateway->enableDoubleCheckIfPruidExists ? true : false,
                             "hostedPayload" => WC()->session ? WC()->session->get('hostedPayload') : null,
-                            "iframeRedirectLegacy" => boolval(property_exists($this->payplus_payment_gateway_settings, 'iframe_redirect_legacy') && $this->payplus_payment_gateway_settings->iframe_redirect_legacy === 'yes'),
                         ]
                     );
                     if (!is_cart() && !is_product() && !is_shop()) {

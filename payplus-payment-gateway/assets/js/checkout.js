@@ -41,35 +41,82 @@ jQuery(function ($) {
         }
     }
 
-    // Run check immediately and also after a short delay to catch dynamically loaded content
+    // Run check only at initial page load to detect mis-configured hosted fields
+    // (i.e. the gateway appears in the list but the payment UI was never rendered).
+    // Do NOT run this on updated_checkout: after a fragment refresh the hosted fields
+    // SDK hasn't re-initialised yet, so .pp_iframe_h is temporarily absent and the
+    // function would incorrectly hide the hosted-fields gateway list item.
     checkAndHideHostedFieldsIfMissing();
     setTimeout(checkAndHideHostedFieldsIfMissing, 100);
     setTimeout(checkAndHideHostedFieldsIfMissing, 500);
-    
-    // Also check when checkout is updated
-    jQuery(document.body).on('updated_checkout', function() {
-        checkAndHideHostedFieldsIfMissing();
-    });
 
-    // ── Firefox-safe iframe redirect: 3-layer approach ──────────────────────
+    // ── Iframe payment redirect: 2-layer approach ───────────────────────────
     //
-    // Layer 1 (sandbox): The iframe has sandbox="allow-top-navigation-by-user-activation"
-    //   so if the user clicked inside the iframe, Firefox allows top navigation natively.
+    // The iframe has sandbox="...allow-top-navigation" so PayPlus's own
+    // redirectAfterTransaction can navigate the top window to the callback URL.
+    // Using unconditional allow-top-navigation (not -by-user-activation) avoids
+    // Chrome "Unsafe attempt" errors and Firefox "prevented redirect" prompts.
     //
-    // Layer 2 (postMessage fast-path): When ipn_response finishes inside the iframe,
-    //   it sends a postMessage with the redirect URL. The parent picks it up here
-    //   and redirects immediately — no polling delay.
+    // Layer 1 (top-window navigation — primary):
+    //   PayPlus JS does window.top.location = callbackUrl after payment.
+    //   The callback URL loads in the top window; payplus_redirect_graceful
+    //   outputs a JS page that immediately does window.location.href = thankYouUrl.
+    //   The IPN/callback URL is visible in the address bar for ~50ms (JS execution
+    //   time) — imperceptible to users.
     //
-    // Layer 3 (polling fallback): If both above fail (e.g. cross-origin, no user gesture),
-    //   the parent polls the server every 1.5s for order status and redirects when
-    //   the order moves to processing/completed.
+    // Layer 2 (polling fallback — safety net):
+    //   PayPlus also sends a server-to-server IPN independent of the browser.
+    //   The parent polls /wp-admin/admin-ajax.php every 1.5s; as soon as the
+    //   order reaches processing/completed it redirects to the thank-you URL.
+    //   → Works if the browser redirect is blocked or the user closes the popup
+    //     before completion (in production with real IPN).
     //
-    // Together these three layers guarantee a redirect in every browser.
+    // postMessage listener (below) is an additional fast-path for cases where
+    // PayPlus navigates the iframe itself (not the top window) to the callback.
     // ──────────────────────────────────────────────────────────────────────────
 
     var _payplusPollDone = false; // shared flag so postMessage can cancel polling
+    var _payplusTvEffectInProgress = false; // flag to prevent multiple redirects during TV effect
 
-    // Layer 2: postMessage listener (fast-path)
+    // Helper: trigger TV power-down effect before redirect (popup mode only)
+    function redirectWithTvEffect(url) {
+        // Prevent multiple calls
+        if (_payplusTvEffectInProgress) {
+            return;
+        }
+        
+        // Only apply TV effect if:
+        // 1. Feature is enabled (popupTvEffect setting)
+        // 2. Display mode is popupIframe
+        // 3. Alertify popup exists
+        if (
+            payplus_script_checkout.popupTvEffect &&
+            payplus_script_checkout.viewMode === 'popupIframe' &&
+            typeof alertify !== 'undefined' &&
+            jQuery('.alertify').length > 0
+        ) {
+            _payplusTvEffectInProgress = true;
+            _payplusPollDone = true; // Stop polling from redirecting
+            
+            // Add TV closing class to trigger animation on .ajs-dialog
+            jQuery('.alertify').addClass('tv-closing');
+            
+            // Wait for animation to complete (1000ms) then redirect
+            setTimeout(function() {
+                window.location.href = url;
+            }, 1050);
+            
+            // IMPORTANT: Return without redirecting immediately
+            return;
+        }
+        
+        // No TV effect, redirect immediately
+        window.location.href = url;
+    }
+
+    // Layer 1: postMessage listener (fast-path)
+    // The IPN page (loaded inside the iframe) sends this message after processing.
+    // We validate the URL is same-origin before redirecting.
     window.addEventListener('message', function(e) {
         if (!e.data || e.data.type !== 'payplus_redirect' || !e.data.url) {
             return;
@@ -77,15 +124,15 @@ jQuery(function ($) {
         try {
             var u = new URL(e.data.url, window.location.origin);
             if (u.origin === window.location.origin) {
-                _payplusPollDone = true; // cancel any active polling
-                window.location.href = e.data.url;
+                _payplusPollDone = true;
+                redirectWithTvEffect(e.data.url);
             }
         } catch (err) {
             // ignore invalid URL
         }
     });
 
-    // Layer 3: polling fallback
+    // Layer 2: polling fallback
     function startOrderStatusPoll(result) {
         if (!result || !result.order_id || !result.order_received_url) return;
 
@@ -123,7 +170,7 @@ jQuery(function ($) {
                         var s = res.data.status;
                         if (s === 'processing' || s === 'completed' || s === 'wc-processing' || s === 'wc-completed') {
                             _payplusPollDone = true;
-                            window.location.href = res.data.redirect_url || redirectUrl;
+                            redirectWithTvEffect(res.data.redirect_url || redirectUrl);
                         }
                     }
                 },
@@ -210,7 +257,11 @@ jQuery(function ($) {
 
                 if (hostedIsMain) {
                     setTimeout(function () {
-                        $("input#" + inputPayPlus).prop("checked", true);
+                        // Use .trigger('click') instead of .prop('checked') to fire WC's
+                        // payment_method_selected handler, which sets selectedPaymentMethod.
+                        // This ensures init_payment_methods can restore hosted-fields after
+                        // a fragment refresh (otherwise it falls back to the first method).
+                        $("input#" + inputPayPlus).trigger('click');
                         $("div.container.hostedFields").show();
                     }, 1000);
                 } else {
@@ -365,10 +416,10 @@ jQuery(function ($) {
                 .prop("id");
 
             if ($payment_methods.length > 1) {
-                // Hide open descriptions.
+                // Hide open descriptions (instant, no animation for testing)
                 $('div.payment_box:not(".' + checkedPaymentMethod + '")')
                     .filter(":visible")
-                    .slideUp(0);
+                    .hide();
             }
 
             // Trigger click event for selected method
@@ -390,10 +441,10 @@ jQuery(function ($) {
                     is_checked = $(this).is(":checked");
 
                 if (is_checked && !target_payment_box.is(":visible")) {
-                    $("div.payment_box").filter(":visible").slideUp(230);
-
+                    // Use fadeOut/fadeIn for smooth transitions (CSS handles opacity)
+                    $("div.payment_box").filter(":visible").fadeOut(200);
                     if (is_checked) {
-                        target_payment_box.slideDown(230);
+                        target_payment_box.fadeIn(200);
                     }
                 }
             }
@@ -1110,12 +1161,20 @@ jQuery(function ($) {
                                         700
                                     );
                                 }
-                                // Start polling for order completion (Layer 3 fallback)
-                                // Only in new mode — legacy mode relies on direct redirect from iframe.
-                                if (!payplus_script_checkout.iframeRedirectLegacy) {
-                                    startOrderStatusPoll(result);
-                                }
+                                // Start polling fallback (Layer 2).
+                                startOrderStatusPoll(result);
                                 return true;
+                            }
+                            // Plain 'iframe' mode: the payment page is already on the page.
+                            // The top window navigates away (result.redirect → order-pay page),
+                            // but we can still start polling in case the user stays on this page.
+                            if (
+                                result.viewMode === "iframe" &&
+                                "success" === result.result &&
+                                result.order_id &&
+                                result.order_received_url
+                            ) {
+                                startOrderStatusPoll(result);
                             }
                             try {
                                 if (
@@ -1133,11 +1192,9 @@ jQuery(function ($) {
                                         -1 ===
                                         result.redirect.indexOf("http://")
                                     ) {
-                                        window.location = result.redirect;
+                                        redirectWithTvEffect(result.redirect);
                                     } else {
-                                        window.location = decodeURI(
-                                            result.redirect
-                                        );
+                                        redirectWithTvEffect(decodeURI(result.redirect));
                                     }
                                 } else if ("failure" === result.result) {
                                     throw "Result failure";
@@ -1382,6 +1439,21 @@ jQuery(function ($) {
     wc_checkout_login_form.init();
     wc_terms_toggle.init();
 
+    // After every checkout update, ensure selectedPaymentMethod is synced with the
+    // actually-checked payment method radio. This handles cases where:
+    // - Token-switching logic programmatically checked the main gateway
+    // - Fragment refresh rendered a different method as checked than what the user selected
+    // - User interacted with hosted fields iframe (clicks don't bubble to our handlers)
+    $(document.body).on('updated_checkout', function() {
+        var $checked = $('input[name="payment_method"]:checked');
+        if ($checked.length) {
+            var checkedId = $checked.attr('id');
+            if (checkedId && wc_checkout_form.selectedPaymentMethod !== checkedId) {
+                wc_checkout_form.selectedPaymentMethod = checkedId;
+            }
+        }
+    });
+
     // Hide main gateway visually when hosted fields is main (but keep it in DOM for token payments)
     if (payplus_script_checkout.hostedFieldsIsMain) {
         var hideMainGateway = function() {
@@ -1452,10 +1524,15 @@ jQuery(function ($) {
 
         if ($hostedFieldsInput.is(':checked')) {
             if (selectedValue !== 'new') {
-                // A saved token is selected - we need to use main gateway for token processing
-                // Make main gateway visible but keep it hidden from user
+                // A saved token is selected — route through the main gateway for processing.
+                // We only need the radio to be checked for form serialisation; we must NOT
+                // apply display:none to the main gateway <li> here because this handler also
+                // fires during WC's paymentDetails restore after every checkout fragment
+                // refresh, which would incorrectly hide the gateway on every shipping change.
+                // The hostedIsMain case is handled separately by hideMainGateway().
                 if ($mainGatewayLi.length === 0) {
-                    // Main gateway was removed, we need to temporarily add it back
+                    // Main gateway was removed from the fragment (hidePPGateway with no tokens);
+                    // inject a hidden placeholder so WC can serialise the correct payment_method.
                     var mainGatewayHtml = '<li class="wc_payment_method payment_method_payplus-payment-gateway" style="display:none !important;">' +
                         '<input id="payment_method_payplus-payment-gateway" type="radio" class="input-radio" name="payment_method" value="payplus-payment-gateway" />' +
                         '<label for="payment_method_payplus-payment-gateway">PayPlus</label>' +
@@ -1463,8 +1540,6 @@ jQuery(function ($) {
                         '</li>';
                     $('.payment_method_payplus-payment-gateway-hostedfields').before(mainGatewayHtml);
                     $mainGatewayInput = $('input#payment_method_payplus-payment-gateway');
-                } else {
-                    $mainGatewayLi.css('display', 'none');
                 }
                 $mainGatewayInput.prop('checked', true);
                 $('body').attr('data-payplus-using-token', 'yes');
@@ -1567,12 +1642,14 @@ jQuery(function ($) {
         iframe.width = width;
         iframe.setAttribute("style", `border:0px`);
         iframe.setAttribute("allowpaymentrequest", "allowpaymentrequest");
-        // In new (default) mode: sandbox the iframe so Firefox allows top navigation
-        // only after a user gesture, avoiding the "prevented redirect" prompt.
-        // In legacy mode: skip sandbox so the old direct wp_safe_redirect works as before.
-        if (!payplus_script_checkout.iframeRedirectLegacy) {
-            iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation-by-user-activation");
-        }
+        // allow-top-navigation lets PayPlus's own redirectAfterTransaction navigate the top
+        // window to the callback URL after payment — required for the redirect to work at all.
+        // Using the unconditional flag (not -by-user-activation) avoids:
+        //   • Chrome "Unsafe attempt to initiate navigation" errors (gesture expiry)
+        //   • Firefox "prevented redirect" permission bar
+        // The callback URL (IPN URL) is immediately redirected to the clean thank-you URL
+        // by payplus_redirect_graceful, so users never see it in the address bar.
+        iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation");
         return iframe;
     }
     function openPayplusIframe(src) {

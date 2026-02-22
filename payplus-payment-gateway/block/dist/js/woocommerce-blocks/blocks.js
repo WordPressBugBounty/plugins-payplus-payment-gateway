@@ -102,6 +102,53 @@ if (isCheckout || hasOrder) {
 
     // Prevent double redirects when both postMessage and polling fire
     var _payplusPollDone = false;
+    var _payplusTvEffectInProgress = false; // flag to prevent multiple redirects during TV effect
+
+    // Helper: trigger TV power-down effect before redirect (BLOCKS CHECKOUT)
+    function redirectWithTvEffect(url) {
+        // Prevent multiple calls
+        if (_payplusTvEffectInProgress) {
+            return;
+        }
+        
+        // Only apply TV effect if:
+        // 1. Feature is enabled (popupTvEffect setting)
+        // 2. .pp_iframe container exists
+        // 3. The iframe is actually in popup mode (position: fixed, not relative)
+        if (
+            payPlusGateWay && 
+            payPlusGateWay.popupTvEffect &&
+            jQuery('.pp_iframe').length > 0
+        ) {
+            var $popup = jQuery('.pp_iframe');
+            
+            // Check if the iframe is actually displayed as a popup (fixed positioning)
+            // samePageIframe uses position: relative, popupIframe uses position: fixed
+            var isActuallyPopup = $popup.css('position') === 'fixed';
+            
+            if (isActuallyPopup) {
+                _payplusTvEffectInProgress = true;
+                _payplusPollDone = true; // Stop polling from redirecting
+                
+                // Add TV closing class to the .pp_iframe container div (popup only)
+                $popup.addClass('tv-closing-blocks');
+                
+                // Force a reflow to ensure CSS is applied
+                $popup[0].offsetHeight;
+                
+                // Wait for animation to complete (1000ms) then redirect
+                setTimeout(function() {
+                    window.location.href = url;
+                }, 1050);
+                
+                // IMPORTANT: Return without redirecting immediately
+                return;
+            }
+        }
+        
+        // No TV effect, redirect immediately
+        window.location.href = url;
+    }
 
     // Firefox blocks cross-origin iframe from navigating top window. When PayPlus iframe sends
     // postMessage with redirect URL (or thank-you page loads in iframe), parent performs the redirect.
@@ -113,7 +160,7 @@ if (isCheckout || hasOrder) {
             var u = new URL(e.data.url, window.location.origin);
             if (u.origin === window.location.origin) {
                 _payplusPollDone = true;
-                window.location.href = e.data.url;
+                redirectWithTvEffect(e.data.url);
             }
         } catch (err) {
             // ignore invalid URL
@@ -160,7 +207,7 @@ if (isCheckout || hasOrder) {
                         if (status === 'processing' || status === 'completed' ||
                             status === 'wc-processing' || status === 'wc-completed') {
                             _payplusPollDone = true;
-                            window.location.href = response.data.redirect_url || redirectUrl;
+                            redirectWithTvEffect(response.data.redirect_url || redirectUrl);
                         }
                     }
                 }
@@ -704,6 +751,11 @@ if (isCheckout || hasOrder) {
         iframe.style.border = "0";
         iframe.style.display = "block";
         iframe.style.margin = "auto";
+        // allow-top-navigation lets PayPlus's own redirectAfterTransaction navigate the top
+        // window to the callback URL after payment. Using unconditional (not -by-user-activation)
+        // avoids Chrome "Unsafe attempt" errors and Firefox "prevented redirect" prompts.
+        // payplus_redirect_graceful immediately JS-redirects to the clean thank-you URL.
+        iframe.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation");
 
         iframe.src = paymentPageLink;
         let pp_iframes = document.querySelectorAll(".pp_iframe");
