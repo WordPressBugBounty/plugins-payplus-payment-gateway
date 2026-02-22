@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.1.0
+ * Version: 8.1.1
  * Tested up to: 6.9
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.1.0');
-define('PAYPLUS_VERSION_DB', 'payplus_8_1_0');
+    define('PAYPLUS_VERSION', '8.1.1');
+    define('PAYPLUS_VERSION_DB', 'payplus_8_1_1');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -94,6 +94,10 @@ class WC_PayPlus
         // AJAX endpoint for client-side polling of order status (Firefox iframe redirect fallback)
         add_action('wp_ajax_payplus_check_order_redirect', [$this, 'ajax_payplus_check_order_redirect']);
         add_action('wp_ajax_nopriv_payplus_check_order_redirect', [$this, 'ajax_payplus_check_order_redirect']);
+
+        // AJAX endpoint: fetch PayPlus payment page link asynchronously (Blocks iframe modes)
+        add_action('wp_ajax_payplus_get_iframe_link', [$this, 'ajax_get_iframe_link']);
+        add_action('wp_ajax_nopriv_payplus_get_iframe_link', [$this, 'ajax_get_iframe_link']);
 
         //end custom hook
 
@@ -1157,6 +1161,71 @@ class WC_PayPlus
         wp_send_json_success([
             'status'       => $status,
             'redirect_url' => $redirect_url,
+        ]);
+    }
+
+    /**
+     * Async AJAX handler for Blocks Checkout iframe modes.
+     *
+     * During checkout submission, add_payment_request_order_meta() builds the payload
+     * (fast, local) and saves it to order meta, then returns immediately — without
+     * making the slow external PayPlus HTTP call.  This handler picks up the saved
+     * payload and runs payPlusRemote() after the checkout form has already unblocked,
+     * so the 7-10 s PayPlus API delay is hidden behind the loading overlay.
+     */
+    public function ajax_get_iframe_link()
+    {
+        check_ajax_referer('frontNonce', '_ajax_nonce');
+
+        $order_id  = isset($_REQUEST['order_id']) ? absint($_REQUEST['order_id']) : 0;
+        $order_key = isset($_REQUEST['order_key']) ? sanitize_text_field(wp_unslash($_REQUEST['order_key'])) : '';
+
+        if (!$order_id || !$order_key) {
+            wp_send_json_error(['message' => 'Invalid order']);
+        }
+
+        $order = wc_get_order($order_id);
+        if (!$order || $order->get_order_key() !== $order_key) {
+            wp_send_json_error(['message' => 'Order not found']);
+        }
+
+        $payload     = WC_PayPlus_Meta_Data::get_meta($order, 'payplus_payload');
+        $payment_url = WC_PayPlus_Meta_Data::get_meta($order, 'payplus_payment_url');
+
+        if (empty($payload) || empty($payment_url)) {
+            wp_send_json_error(['message' => 'Payment data missing — please retry checkout']);
+        }
+
+        // This is the only slow line: the external PayPlus HTTP request.
+        $response      = WC_PayPlus_Statics::payPlusRemote($payment_url, $payload);
+        $responseArray = json_decode(wp_remote_retrieve_body($response), true);
+
+        if (!isset($responseArray['results']) || $responseArray['results']['status'] === 'error') {
+            $msg = isset($responseArray['results']['description'])
+                ? wp_strip_all_tags($responseArray['results']['description'])
+                : (isset($responseArray['message']) ? $responseArray['message'] : 'Unknown PayPlus error');
+            wp_send_json_error(['message' => $msg]);
+        }
+
+        $link = $responseArray['data']['payment_page_link'];
+
+        // Persist IPN-matching data now that we have it.
+        WC_PayPlus_Meta_Data::update_meta($order, [
+            'payplus_page_request_uid'  => $responseArray['data']['page_request_uid'],
+            'payplus_payment_page_link' => $link,
+        ]);
+
+        // Set session so cart restoration works correctly.
+        $async_method = WC_PayPlus_Meta_Data::get_meta($order, 'payplus_async_method');
+        if ($async_method !== 'payplus-payment-gateway-hostedfields' && WC()->session) {
+            WC()->session->set('page_order_awaiting_payment', $order_id);
+        }
+
+        wp_send_json_success([
+            'payment_page_link'  => $link,
+            'order_id'           => $order_id,
+            'order_key'          => $order_key,
+            'order_received_url' => $order->get_checkout_order_received_url(),
         ]);
     }
 

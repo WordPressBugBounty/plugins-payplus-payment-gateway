@@ -1,8 +1,8 @@
 {
-    "\/payplus-payment-gateway.php": "b963815ce094ce015de830edcc78a0cdd9640bbc4a24223b4fa3f0effeb78382",
+    "\/payplus-payment-gateway.php": "c58d8f7cd876c0101b6813f8c83fe6371566b8531ba3d07bb9f8e3fabc64b029",
     "\/index.php": "c491dec192c55a18cd5d9ec23375720d58d40455dc685e7e4093c1198cc76b89",
-    "\/CHANGELOG.md": "371680de37be548bfeb20f63af0a9c12b00f2b7028a78bdf80077310c5851882",
-    "\/includes\/blocks\/class-wc-payplus-blocks-support.php": "af5aa46660b85c66f7d7bc7c1868a6ae1eaedf000e4e2e6c050efec70657018a",
+    "\/CHANGELOG.md": "6f2d4699d4c170d342a1eead5f0313f7e7419b03e3dfbf0391dcc0909a64a3c5",
+    "\/includes\/blocks\/class-wc-payplus-blocks-support.php": "77d80e167b0f4165d13a6797dd1ddcbf05b6bcf1471a7af77f956bee7bca0319",
     "\/includes\/wc_payplus_express_checkout.php": "0e227cc783f67068b2f23fd4e1045ac6b2b2969c483a11e8661a3ea3fa8c3b7d",
     "\/includes\/wc_payplus_invoice.php": "6e3442e8336ec9b2a0532170982937ee555dd590f14c3aedfcb27e0ba8e0215f",
     "\/includes\/wc-payplus-activation-functions.php": "04c26cc834bf48d48aa7b66b6663cb7ae9539540ce54e7b32282983a9122daf2",
@@ -26,7 +26,7 @@
     "\/languages\/payplus-payment-gateway-he_IL.po": "ab8117d38c055e9c45543a300fdca0a08ec45da633ef145db4a657cc5a40a784",
     "\/languages\/payplus-payment-gateway.pot": "8869bece7da90f4afeafadf4ca2dfcf350f753bbe0663db16a083f1e0de8035d",
     "\/templates\/hostedFields.php": "640574751191114c65fc137aa7b4ad7011452ce43043be1bd3ec0c4f6db26676",
-    "\/readme.txt": "3af8cbc94f0042add2253ea288a01513420afc8fcc9145b273452c2206385c64",
+    "\/readme.txt": "d6029fee0d6f4c8752014625d570c93ed6d6b2ac85f8f3ea732a41a919686935",
     "\/assets\/css\/alertify.min.css": "12e60b6d60e45a69e3dc0f442bb4005eb47fba5ceb42fc6435cd8b4867a3f69d",
     "\/assets\/css\/admin.scss": "02157f910d6c8f917da018bac5fed1022046b427e2a5a9174fc5cc68182070c5",
     "\/assets\/css\/style.min.css.map": "15c6d2df41e6723135635e7851fc76d854b7a187bc0b07ef3ae19f9d37b794d7",
@@ -127,7 +127,7 @@
     "\/assets\/js\/admin-payments.min.js": "d1ae64a19bebaaf50e6e273f78c5f1154d577c4395a63bd22910d30a58151836",
     "\/assets\/js\/checkout.js": "635705ba52e88f13b98513150905251d909154d250c1f9f7db2276ec7e81f6c3",
     "\/block\/dist\/css\/woocommerce-blocks\/style.css": "5b51b0d574ac6e17118924b59c0d2bdabd115a9db88b28d514146804e4204326",
-    "\/block\/dist\/js\/woocommerce-blocks\/blocks.min.js": "6fd47b50ce0fd31bf7a198cf4aaf6827493e6ee3d1df4f4be4f76a4e2845e29d",
-    "\/block\/dist\/js\/woocommerce-blocks\/blocks.js": "088b9e440630ae4d42e877f8183e8805b54d87250f9ecf74ce85e187a9becd8b",
+    "\/block\/dist\/js\/woocommerce-blocks\/blocks.min.js": "6c8388ec42d972b7836dce168d11ac8e538b4474c38ff309cad09852f24477d5",
+    "\/block\/dist\/js\/woocommerce-blocks\/blocks.js": "23c64e838089651cc8b97e59b721e74463fb71e4478279c4a2c77593fe466f8f",
     "\/block\/dist\/js\/woocommerce-blocks\/blocks.asset.php": "ee27901c649cc184a359223c715ba3faffcaaee6e5fcd4ad896a09128b113325"
 }
