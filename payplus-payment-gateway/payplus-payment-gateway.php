@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.1.1
+ * Version: 8.1.2
  * Tested up to: 6.9
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-    define('PAYPLUS_VERSION', '8.1.1');
-    define('PAYPLUS_VERSION_DB', 'payplus_8_1_1');
+define('PAYPLUS_VERSION', '8.1.2');
+define('PAYPLUS_VERSION_DB', 'payplus_8_1_2');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -108,6 +108,7 @@ class WC_PayPlus
         add_action('woocommerce_init', [$this, 'pwgc_remove_processing_redemption'], 11);
         add_action('woocommerce_checkout_order_processed', [$this, 'payplus_checkout_order_processed'], 25, 3);
         add_action('woocommerce_thankyou', [$this, 'payplus_clear_session_on_order_received'], 10, 1);
+        add_action('woocommerce_thankyou', [$this, 'payplus_clear_pw_gift_cards_session'], 10, 1);
         add_action('wp_footer', [$this, 'payplus_thankyou_iframe_redirect_script'], 5);
 
         //FILTER
@@ -300,6 +301,30 @@ class WC_PayPlus
     }
 
     /**
+     * Internal helper: removes all PW Gift Cards data from the active WC session.
+     * Called from ipn_response() and woocommerce_thankyou so we always clear in
+     * whatever context has a valid session cookie.
+     */
+    public function payplus_clear_pw_gift_cards_session_data()
+    {
+        if (!WC()->session) {
+            return;
+        }
+        $session_key = defined('PWGC_SESSION_KEY') ? PWGC_SESSION_KEY : 'pw-gift-card-data';
+        WC()->session->__unset($session_key);
+    }
+
+    /**
+     * Clear PW Gift Cards session data when the order-received (thank-you) page loads.
+     * Acts as a secondary cleanup layer in addition to ipn_response() and the
+     * pwgc_redeeming_session_data filter which auto-prunes depleted cards.
+     */
+    public function payplus_clear_pw_gift_cards_session($order_id)
+    {
+        $this->payplus_clear_pw_gift_cards_session_data();
+    }
+
+    /**
      * When thank-you page is loaded inside the PayPlus payment iframe (e.g. Firefox blocks
      * iframe from navigating top), tell the parent to redirect so the top window goes to thank-you.
      */
@@ -375,10 +400,26 @@ class WC_PayPlus
         }
     }
 
-    public function modify_gift_card_session_data($session_data, $gift_card_number)
+    public function modify_gift_card_session_data($session_data, $cart)
     {
-        // Modify session data if necessary
+        // Capture session data for internal PayPlus use (gift card discount propagation).
         $this->pwGiftCardData = $session_data;
+
+        // Auto-remove gift cards that have been fully debited (DB balance = 0) so they do
+        // not reappear in subsequent orders after payment. We only remove a card when its
+        // calculated session amount is also 0 — if another card already covered the total,
+        // a valid card may legitimately show 0 amount and should not be pruned.
+        if (!empty($session_data['gift_cards']) && is_array($session_data['gift_cards']) && class_exists('PW_Gift_Card')) {
+            foreach ($session_data['gift_cards'] as $card_number => $amount) {
+                if ($amount == 0) {
+                    $gift_card_obj = new PW_Gift_Card($card_number);
+                    if ($gift_card_obj->get_id() && floatval($gift_card_obj->get_balance()) <= 0) {
+                        unset($session_data['gift_cards'][$card_number]);
+                    }
+                }
+            }
+        }
+
         return $session_data;
     }
 
@@ -391,19 +432,51 @@ class WC_PayPlus
      */
     public function pwgc_remove_processing_redemption()
     {
-        global $pw_gift_cards_redeeming;
+        global $pw_gift_cards_redeeming, $pw_gift_cards_blocks;
 
-        // Check if PW Gift Cards redeeming class exists
-        if (!isset($pw_gift_cards_redeeming) || !is_object($pw_gift_cards_redeeming)) {
-            return;
+        // Classic checkout: remove hooks that debit gift cards immediately during checkout submission.
+        if (isset($pw_gift_cards_redeeming) && is_object($pw_gift_cards_redeeming)) {
+            remove_action('woocommerce_pre_payment_complete', array($pw_gift_cards_redeeming, 'woocommerce_pre_payment_complete'));
+            remove_action('woocommerce_checkout_update_order_meta', array($pw_gift_cards_redeeming, 'woocommerce_checkout_update_order_meta'), 10, 2);
         }
 
-        // Remove early redemption hooks that debit gift cards immediately at checkout
-        remove_action('woocommerce_pre_payment_complete', array($pw_gift_cards_redeeming, 'woocommerce_pre_payment_complete'));
-        remove_action('woocommerce_checkout_update_order_meta', array($pw_gift_cards_redeeming, 'woocommerce_checkout_update_order_meta'), 10, 2);
+        // Blocks checkout: PW Gift Cards hooks woocommerce_store_api_checkout_order_processed
+        // and immediately calls debit_gift_cards() before PayPlus opens the payment page.
+        // We replace it with our own handler that:
+        //   - Still adds the gift card line item to the WC order and recalculates totals
+        //     (so the order-pay page shows the correct discounted amount), but
+        //   - Does NOT call debit_gift_cards() — the balance is debited only when the order
+        //     reaches "processing" or "completed" status, exactly as with classic checkout.
+        if (isset($pw_gift_cards_blocks) && is_object($pw_gift_cards_blocks)) {
+            remove_action('woocommerce_store_api_checkout_order_processed', array($pw_gift_cards_blocks, 'woocommerce_store_api_checkout_order_processed'));
 
-        // Note: We keep woocommerce_order_status_processing and woocommerce_order_status_completed
-        // hooks so gift cards are debited when order status changes to processing or completed
+            add_action('woocommerce_store_api_checkout_order_processed', function ($order) {
+                global $pw_gift_cards_redeeming;
+                if (!is_a($pw_gift_cards_redeeming, 'PW_Gift_Cards_Redeeming')) {
+                    return;
+                }
+
+                // Remove any existing gift card line items before adding fresh ones.
+                // When the same pending order is resubmitted (e.g. the customer closes
+                // and reopens the payment page), this hook fires again on the same order.
+                // Without this removal each submission would stack another set of items.
+                foreach ($order->get_items('pw_gift_card') as $item_id => $item) {
+                    $order->remove_item($item_id);
+                }
+
+                // Add gift card items to the order and recalculate totals so the
+                // WooCommerce order total reflects the gift card discount.
+                $pw_gift_cards_redeeming->woocommerce_checkout_create_order($order);
+                if ($order->get_items('pw_gift_card')) {
+                    $order->calculate_totals();
+                    $order->save();
+                }
+                // debit_gift_cards() intentionally omitted — debited on order status change.
+            });
+        }
+
+        // Note: woocommerce_order_status_processing and woocommerce_order_status_completed
+        // hooks remain intact so gift cards are still debited once payment is confirmed.
     }
 
     public function wc_payplus_check_version()
@@ -977,6 +1050,7 @@ class WC_PayPlus
                 if (WC()->session) {
                     WC()->session->__unset('page_order_awaiting_payment');
                 }
+                $this->payplus_clear_pw_gift_cards_session_data();
                 $redirect_to = add_query_arg('order-received', $order_id, get_permalink(wc_get_page_id('checkout')));
                 $this->payplus_redirect_graceful($redirect_to);
             } else {
@@ -1070,6 +1144,7 @@ class WC_PayPlus
                 WC()->session->__unset('save_payment_method');
                 WC()->session->__unset('order_awaiting_payment');
                 WC()->session->__unset('page_order_awaiting_payment');
+                $this->payplus_clear_pw_gift_cards_session_data();
                 if (WC()->cart) {
                     WC()->cart->empty_cart();
                 }
@@ -1107,6 +1182,7 @@ class WC_PayPlus
                 WC()->session->__unset('save_payment_method');
                 WC()->session->__unset('order_awaiting_payment');
                 WC()->session->__unset('page_order_awaiting_payment');
+                $this->payplus_clear_pw_gift_cards_session_data();
                 if (WC()->cart) {
                     WC()->cart->empty_cart();
                 }
@@ -1123,6 +1199,7 @@ class WC_PayPlus
                 WC()->session->__unset('save_payment_method');
                 WC()->session->__unset('order_awaiting_payment');
                 WC()->session->__unset('page_order_awaiting_payment');
+                $this->payplus_clear_pw_gift_cards_session_data();
                 if (WC()->cart) {
                     WC()->cart->empty_cart();
                 }
@@ -2308,7 +2385,9 @@ body{
             public function register_customer_invoice_name_blocks_field()
             {
                 $payplus_settings = get_option('woocommerce_payplus-payment-gateway_settings');
-                $enable_customer_invoice_name = isset($payplus_settings['enable_customer_invoice_name']) && $payplus_settings['enable_customer_invoice_name'] === 'yes';
+                $enable_customer_invoice_name   = isset($payplus_settings['enable_customer_invoice_name']) && $payplus_settings['enable_customer_invoice_name'] === 'yes';
+                $customer_invoice_name_required = $enable_customer_invoice_name && isset($payplus_settings['customer_invoice_name_required']) && $payplus_settings['customer_invoice_name_required'] === 'yes';
+                $customer_invoice_name_label    = $enable_customer_invoice_name && !empty($payplus_settings['customer_invoice_name_label']) ? trim($payplus_settings['customer_invoice_name_label']) : '';
 
                 if (!$enable_customer_invoice_name) {
                     return;
@@ -2318,17 +2397,22 @@ body{
                 $current_locale = get_locale();
                 $is_hebrew = (strpos($current_locale, 'he') === 0 || strpos($current_locale, 'iw') === 0);
 
+                // Determine label: admin-defined text takes priority over language defaults.
+                $field_label = $customer_invoice_name_label !== ''
+                    ? $customer_invoice_name_label
+                    : ($is_hebrew ? __('שם על החשבונית', 'payplus-payment-gateway') : __('Name on invoice', 'payplus-payment-gateway'));
+
                 // Register the field for WooCommerce Blocks
                 // Note: woocommerce_register_additional_checkout_field automatically handles woocommerce_blocks_loaded timing
                 // If woocommerce_blocks_loaded hasn't fired yet, it will re-hook itself to that hook
                 if (function_exists('woocommerce_register_additional_checkout_field')) {
                     try {
                         woocommerce_register_additional_checkout_field([
-                            'id' => 'payplus/customer-invoice-name',
-                            'label' => $is_hebrew ? __('שם על החשבונית', 'payplus-payment-gateway') : __('Name on invoice', 'payplus-payment-gateway'),
+                            'id'       => 'payplus/customer-invoice-name',
+                            'label'    => $field_label,
                             'location' => 'contact',
-                            'type' => 'text',
-                            'required' => false,
+                            'type'     => 'text',
+                            'required' => $customer_invoice_name_required,
                         ]);
                     } catch (Exception $e) {
                         // Log error if field registration fails

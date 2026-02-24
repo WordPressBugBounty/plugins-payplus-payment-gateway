@@ -135,6 +135,29 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
         $isTaxIncluded = wc_prices_include_tax();
 
         if (isset($order) && $order) {
+            // Restore PW Gift Cards data onto the gateway instance so that
+            // payplus_get_products_by_order_id() includes gift card negative line items.
+            // The filter fires during cart total calculation (before this runs), so the
+            // WC_PayPlus singleton already holds the full session gift card data.
+            if (empty($WC_PayPlus_Gateway->pwGiftCardData)) {
+                $payplus_instance = WC_PayPlus::get_instance();
+                if (!empty($payplus_instance->pwGiftCardData)) {
+                    $WC_PayPlus_Gateway->pwGiftCardData = $payplus_instance->pwGiftCardData;
+                } else {
+                    // Fallback: read from order meta (saved by woocommerce_store_api_checkout_order_processed).
+                    $saved = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_pw_gift_cards');
+                    if (!empty($saved)) {
+                        $WC_PayPlus_Gateway->pwGiftCardData = json_decode($saved, true);
+                    }
+                }
+            }
+            // Persist to order meta so the invoice generator can find it at IPN time
+            // (a separate HTTP request where the session filter never fires).
+            // This mirrors exactly what classic checkout's process_payment() does.
+            if (!empty($WC_PayPlus_Gateway->pwGiftCardData)) {
+                WC_PayPlus_Meta_Data::update_meta($order, ['payplus_pw_gift_cards' => wp_json_encode($WC_PayPlus_Gateway->pwGiftCardData)]);
+            }
+
             $objectProducts = $WC_PayPlus_Gateway->payplus_get_products_by_order_id($order_id);
             foreach ($objectProducts->productsItems as $item) {
                 $product = json_decode($item, true);
@@ -469,6 +492,18 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
                 }
             } else {
                 $result->set_payment_details('');
+            }
+
+            // Restore PW Gift Cards data onto the gateway instance before building the payload.
+            // In Blocks checkout, the gateway's pwGiftCardData is never populated via process_payment(),
+            // so we pull it from the WC_PayPlus singleton (which gets it via the pwgc_redeeming_session_data
+            // filter during cart total calculation) — mirroring exactly what classic process_payment() does.
+            $payplus_instance = WC_PayPlus::get_instance();
+            if (!empty($payplus_instance->pwGiftCardData)) {
+                $main_gateway->pwGiftCardData = $payplus_instance->pwGiftCardData;
+                // Also persist it to order meta so the receipt_page() fallback and
+                // any future requests (e.g. ajax_get_iframe_link) can access it.
+                WC_PayPlus_Meta_Data::update_meta($order, ['payplus_pw_gift_cards' => wp_json_encode($main_gateway->pwGiftCardData)]);
             }
 
             // Build the payment payload locally — this is fast (no HTTP call).
