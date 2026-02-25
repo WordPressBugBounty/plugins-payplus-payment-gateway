@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.1.2
+ * Version: 8.1.3
  * Tested up to: 6.9
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.1.2');
-define('PAYPLUS_VERSION_DB', 'payplus_8_1_2');
+define('PAYPLUS_VERSION', '8.1.3');
+define('PAYPLUS_VERSION_DB', 'payplus_8_1_3');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -1330,7 +1330,7 @@ class WC_PayPlus
             : '';
 
         // Server-to-server IPN: no browser, no Accept: text/html — skip silently.
-        $accept     = isset($_SERVER['HTTP_ACCEPT']) ? $_SERVER['HTTP_ACCEPT'] : '';
+        $accept     = isset($_SERVER['HTTP_ACCEPT']) ? sanitize_text_field(wp_unslash($_SERVER['HTTP_ACCEPT'])) : '';
         $is_browser = (strpos($accept, 'text/html') !== false)
             || in_array($fetch_dest, ['iframe', 'frame', 'embed', 'document', 'navigate', ''], true);
         if (!$is_browser) {
@@ -1350,12 +1350,11 @@ class WC_PayPlus
         // The spinner is shown as a brief visual while the parent processes the message.
         nocache_headers();
         header('Content-Type: text/html; charset=utf-8');
-        $msg      = esc_html(__('Payment received — redirecting…', 'payplus-payment-gateway'));
-        $json_url = wp_json_encode($url);
+        $msg      = __('Payment received — redirecting…', 'payplus-payment-gateway');
         $dir      = is_rtl() ? 'rtl' : 'ltr';
-        $lang     = esc_attr(get_bloginfo('language'));
+        $lang     = get_bloginfo('language');
         echo '<!DOCTYPE html>
-<html lang="' . $lang . '" dir="' . $dir . '">
+<html lang="' . esc_attr($lang) . '" dir="' . esc_attr($dir) . '">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1381,10 +1380,10 @@ body{
 </style>
 </head>
 <body>
-<p class="pp-msg">' . $msg . '</p>
+<p class="pp-msg">' . esc_html($msg) . '</p>
 <div class="pp-spinner"></div>
 <script>(function(){
-  var u=' . $json_url . ';
+  var u=' . wp_json_encode($url) . ';
   try{window.parent.postMessage({type:"payplus_redirect",url:u},"*");}catch(e){}
   if(window.self===window.top){window.location.href=u;}
 })();</script>
