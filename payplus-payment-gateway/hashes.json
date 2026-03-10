@@ -1,7 +1,7 @@
 {
-    "\/payplus-payment-gateway.php": "fbe9ffab0a8286c37168717e3dafb55ccbbc5092548bb6341dee2ef94079b797",
+    "\/payplus-payment-gateway.php": "1a8267a0eae15f802f2096a6f1becabb0b16058440e8d2da8a63c00aab2c44f4",
     "\/index.php": "c491dec192c55a18cd5d9ec23375720d58d40455dc685e7e4093c1198cc76b89",
-    "\/CHANGELOG.md": "418b0f90b85b85e26a0d749322af988f71a66c6aec3c078defabd019854ebd3b",
+    "\/CHANGELOG.md": "7f6a0a7d092cd08df199daeb96e3f8859761300ee07400ba3ed1cd4b0d49ede0",
     "\/includes\/blocks\/class-wc-payplus-blocks-support.php": "4fc1de86e63f6f913325286a11965eb99e6efe2e3fe94f8d2ab61e99c876f912",
     "\/includes\/wc_payplus_express_checkout.php": "0e227cc783f67068b2f23fd4e1045ac6b2b2969c483a11e8661a3ea3fa8c3b7d",
     "\/includes\/wc_payplus_invoice.php": "6e3442e8336ec9b2a0532170982937ee555dd590f14c3aedfcb27e0ba8e0215f",
@@ -26,7 +26,7 @@
     "\/languages\/payplus-payment-gateway-he_IL.po": "09a349156d98147fd432bb5e12cf2b03360776e7c6fc14f097dd46060dfb7d92",
     "\/languages\/payplus-payment-gateway.pot": "8869bece7da90f4afeafadf4ca2dfcf350f753bbe0663db16a083f1e0de8035d",
     "\/templates\/hostedFields.php": "edfd8350d54058d41df3537ed5cd4b377224a03d215e046456c981b1203f492a",
-    "\/readme.txt": "19ca4159b0c61c0e5ed4e34348d382df83cd31bc8accd7244591f6a1c8056d7c",
+    "\/readme.txt": "851bc81e336b820f88d7829f25e4c5c2ce1117ed96065dff6692e0fc3e7b8a18",
     "\/assets\/css\/alertify.min.css": "12e60b6d60e45a69e3dc0f442bb4005eb47fba5ceb42fc6435cd8b4867a3f69d",
     "\/assets\/css\/admin.scss": "02157f910d6c8f917da018bac5fed1022046b427e2a5a9174fc5cc68182070c5",
     "\/assets\/css\/style.min.css.map": "15c6d2df41e6723135635e7851fc76d854b7a187bc0b07ef3ae19f9d37b794d7",
