@@ -663,9 +663,15 @@ $numPaymentsAllowed = max(1, min($numPaymentsAllowed, 99)); // Enforce max 99 an
                             <span id="expiry" class="fld-frame"></span>
                         </div>
                         <div class="expiry-wrapper expireCvvClass <?php echo esc_attr($opposite); ?>">
-                            <span id="expirym" class="fld-frame"></span>
-                            <span class="seperator"> / </span>
-                            <span id="expiryy" class="fld-frame"></span>
+                            <?php if ($opposite === 'right') : ?>
+                                <span id="expiryy" class="fld-frame"></span>
+                                <span class="seperator"> / </span>
+                                <span id="expirym" class="fld-frame"></span>
+                            <?php else : ?>
+                                <span id="expirym" class="fld-frame"></span>
+                                <span class="seperator"> / </span>
+                                <span id="expiryy" class="fld-frame"></span>
+                            <?php endif; ?>
                         </div>
                         <div id="cvv-fld" class="expireCvvClass <?php echo esc_attr($direction); ?>">
                             <div class="hf-row" id="cvv-wrapper">
@@ -706,6 +712,10 @@ $numPaymentsAllowed = max(1, min($numPaymentsAllowed, 99)); // Enforce max 99 an
                             src="<?php echo esc_url(site_url() . '/wp-content/plugins/payplus-payment-gateway/assets/images/exclamation.svg'); ?>" />
                     </div>
 
+                    <div id="ppOrderTotal" style="display:none; width:100%; text-align:center; padding:8px 0 4px; margin-top:6px; border-top:1px solid #E3E6E9;">
+                        <span class="pp-total-label" style="font-size:14px; color:#555;"><?php echo esc_html__('Total', 'payplus-payment-gateway'); ?>: </span>
+                        <span class="pp-total-amount" style="font-size:16px; font-weight:600; color:#000;"></span>
+                    </div>
                     <div id="ppLogo">
                         <?php echo esc_html__('Powered by ', 'payplus-payment-gateway'); ?>
                         <img class="hf-image"

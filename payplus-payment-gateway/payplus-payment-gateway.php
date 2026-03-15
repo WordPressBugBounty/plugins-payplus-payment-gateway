@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.1.4
+ * Version: 8.1.5
  * Tested up to: 6.9
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.1.4');
-define('PAYPLUS_VERSION_DB', 'payplus_8_1_4');
+define('PAYPLUS_VERSION', '8.1.5');
+define('PAYPLUS_VERSION_DB', 'payplus_8_1_5');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -219,48 +219,42 @@ class WC_PayPlus
             return;
         }
 
-        $payplus_page_request_uid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid', true);
+        $pruid_history = WC_PayPlus_Meta_Data::get_pruid_history($order_id);
 
-        if (empty($payplus_page_request_uid)) {
+        if (empty($pruid_history)) {
             return;
         }
 
-        $main_gateway->payplus_add_log_all('payplus_double_check', 'Double check IPN started on Checkout Page Load - Order ID: ' . $order_id . ' | Payment Method: ' . $payment_method . ' | Page Request UID: ' . $payplus_page_request_uid);
-
         $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
         $_wpnonce = wp_create_nonce('_wp_payplusIpn');
-        $status = $PayPlusAdminPayments->payplusIpn(
-            $order_id,
-            $_wpnonce,
-            $saveToken = false,
-            $isHostedPayment = false,
-            $allowUpdateStatuses = true,
-            $allowReturn = false,
-            $getInvoice = false,
-            $moreInfo = false,
-            $returnStatusOnly = true
-        );
 
-        $main_gateway->payplus_add_log_all('payplus_double_check', 'Checkout Page Load - Order ID: ' . $order_id . ' | Payment Method: ' . $payment_method . ' | Page Request UID: ' . $payplus_page_request_uid . ' | Response Status: ' . ($status ? $status : 'null/empty'));
+        foreach (array_reverse($pruid_history) as $entry) {
+            $uid = $entry['uid'];
+            $main_gateway->payplus_add_log_all('payplus_double_check', 'Double check IPN on Checkout Page Load - Order ID: ' . $order_id . ' | Payment Method: ' . $payment_method . ' | PRUID: ' . $uid . ' | Source: ' . ($entry['source'] ?? ''));
 
-        if ($status === "processing" || $status === "on-hold" || $status === "approved") {
-            $main_gateway->payplus_add_log_all('payplus_double_check', 'Checkout Page Load - Order ID: ' . $order_id . ' | Payment Method: ' . $payment_method . ' | Status approved - Payment already processed, redirecting');
+            $status = $PayPlusAdminPayments->payplusIpn(
+                $order_id,
+                $_wpnonce,
+                false, false, true, false, false, false, true, false,
+                $uid
+            );
 
-            // Clear cart and unset page_order_awaiting_payment, then redirect to order received page
-            if (WC()->cart) {
-                WC()->cart->empty_cart();
+            $main_gateway->payplus_add_log_all('payplus_double_check', 'Checkout Page Load - Order ID: ' . $order_id . ' | PRUID: ' . $uid . ' | Response Status: ' . ($status ? $status : 'null/empty'));
+
+            if ($status === "processing" || $status === "on-hold" || $status === "approved") {
+                $main_gateway->payplus_add_log_all('payplus_double_check', 'Checkout Page Load - Order ID: ' . $order_id . ' | PRUID: ' . $uid . ' | Status approved - Redirecting');
+
+                if (WC()->cart) {
+                    WC()->cart->empty_cart();
+                }
+                if (WC()->session) {
+                    WC()->session->__unset('page_order_awaiting_payment');
+                }
+
+                $redirect_url = $order->get_checkout_order_received_url();
+                wp_safe_redirect($redirect_url);
+                exit;
             }
-
-            // Unset page_order_awaiting_payment since payment is complete
-            if (WC()->session) {
-                WC()->session->__unset('page_order_awaiting_payment');
-            }
-
-            $redirect_url = $order->get_checkout_order_received_url();
-            wp_safe_redirect($redirect_url);
-            exit;
-        } else {
-            $main_gateway->payplus_add_log_all('payplus_double_check', 'Checkout Page Load - Order ID: ' . $order_id . ' | Payment Method: ' . $payment_method . ' | Status not approved (' . ($status ? $status : 'null/empty') . ') - Continuing with checkout');
         }
     }
 
@@ -545,6 +539,9 @@ class WC_PayPlus
             $linkRedirect = esc_url_raw($this->payplus_gateway->get_return_url($order));
             $metaData['payplus_page_request_uid'] = isset($_POST['page_request_uid']) ? sanitize_text_field(wp_unslash($_POST['page_request_uid'])) : null;
             WC_PayPlus_Meta_Data::update_meta($order, $metaData);
+            if (!empty($metaData['payplus_page_request_uid'])) {
+                WC_PayPlus_Meta_Data::append_pruid_history($order, $metaData['payplus_page_request_uid'], 'hosted_callback');
+            }
             $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
             $_wpnonce = wp_create_nonce('_wp_payplusIpn');
             $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce, $saveToken, true);
@@ -940,7 +937,8 @@ class WC_PayPlus
             $runIpn = true;
             $status = $order->get_status();
             if ($current_hour >= $hour - 2) {
-                $paymentPageUid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid') !== "" ? WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid') : false;
+                $pruid_history = WC_PayPlus_Meta_Data::get_pruid_history($order_id);
+                $paymentPageUid = !empty($pruid_history);
                 $payPlusCronTested = !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_cron_tested')) ? WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_cron_tested') : 1;
                 if ($paymentPageUid && $payPlusCronTested < 5) {
                     ++$payPlusCronTested;
@@ -959,22 +957,34 @@ class WC_PayPlus
                     }
                     if ($runIpn) {
                         WC_PayPlus_Meta_Data::update_meta($order, ['payplus_cron_tested' => $payPlusCronTested]);
-                        $this->payplus_gateway->payplus_add_log_all('payplus-cron-log', "$order_id: created in the last two hours - created at: $hour:$min diff calc (minutes): $calc - Running IPN - check order for results.\n");
+                        $this->payplus_gateway->payplus_add_log_all('payplus-cron-log', "$order_id: created in the last two hours - created at: $hour:$min diff calc (minutes): $calc - Running IPN via PRUID history (" . count($pruid_history) . " UIDs) - check order for results.\n");
                         $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
                         $_wpnonce = wp_create_nonce('_wp_payplusIpn');
                         $order->add_order_note('PayPlus Cron: Running IPN.');
-                        $PayPlusAdminPayments->payplusIpn(
-                            $order_id,
-                            $_wpnonce,
-                            $saveToken = false,
-                            $isHostedPayment = false,
-                            $allowUpdateStatuses = true,
-                            $allowReturn = false,
-                            $getInvoice = false,
-                            $moreInfo = false,
-                            $returnStatusOnly = false,
-                            $isCron = true
-                        );
+
+                        foreach (array_reverse($pruid_history) as $entry) {
+                            $uid = $entry['uid'];
+                            $this->payplus_gateway->payplus_add_log_all('payplus-cron-log', "$order_id: Cron IPN attempt with PRUID: $uid | Source: " . ($entry['source'] ?? 'legacy') . "\n");
+                            $PayPlusAdminPayments->payplusIpn(
+                                $order_id,
+                                $_wpnonce,
+                                $saveToken = false,
+                                $isHostedPayment = false,
+                                $allowUpdateStatuses = true,
+                                $allowReturn = false,
+                                $getInvoice = false,
+                                $moreInfo = false,
+                                $returnStatusOnly = false,
+                                $isCron = true,
+                                $uid
+                            );
+                            $refreshed_order = wc_get_order($order_id);
+                            $new_status = $refreshed_order ? $refreshed_order->get_status() : $status;
+                            if ($new_status !== $status) {
+                                $this->payplus_gateway->payplus_add_log_all('payplus-cron-log', "$order_id: Status changed to $new_status after PRUID $uid — stopping iteration.\n");
+                                break;
+                            }
+                        }
                     }
                 } else {
                     $this->payplus_gateway->payplus_add_log_all('payplus-cron-log', "$order_id - status = $status: Was already tested with cron more than 4 times - skipping.\n");
@@ -1291,6 +1301,7 @@ class WC_PayPlus
             'payplus_page_request_uid'  => $responseArray['data']['page_request_uid'],
             'payplus_payment_page_link' => $link,
         ]);
+        WC_PayPlus_Meta_Data::append_pruid_history($order, $responseArray['data']['page_request_uid'], 'async_payment');
 
         // Set session so cart restoration works correctly.
         $async_method = WC_PayPlus_Meta_Data::get_meta($order, 'payplus_async_method');
@@ -1784,6 +1795,7 @@ body{
                             "isSubscriptionOrder" => $isSubscriptionOrder,
                             "iframeAutoHeight" => $this->iframeAutoHeight,
                             "popupTvEffect" => $this->popupTvEffect,
+                            "enableOrderStatusPoll" => !property_exists($this->payplus_payment_gateway_settings, 'enable_order_status_poll') || $this->payplus_payment_gateway_settings->enable_order_status_poll !== 'no',
                             "viewMode" => $this->payplus_payment_gateway_settings->display_mode ?? 'redirect',
                             "iframeWidth" => $this->payplus_payment_gateway_settings->iframe_width ?? '40%',
                             "hasSavedTokens" => WC_Payment_Tokens::get_customer_tokens(get_current_user_id()),
@@ -1796,6 +1808,7 @@ body{
                             "isSavingCerditCards" => boolval(property_exists($this->payplus_payment_gateway_settings, 'create_pp_token') && $this->payplus_payment_gateway_settings->create_pp_token === 'yes'),
                             "enableDoubleCheckIfPruidExists" => isset($this->payplus_gateway) && $this->payplus_gateway->enableDoubleCheckIfPruidExists ? true : false,
                             "hostedPayload" => WC()->session ? WC()->session->get('hostedPayload') : null,
+                            "showOrderTotal" => isset($this->hostedFieldsOptions['show_order_total']) && $this->hostedFieldsOptions['show_order_total'] === 'yes',
                         ]
                     );
                     if (!is_cart() && !is_product() && !is_shop()) {

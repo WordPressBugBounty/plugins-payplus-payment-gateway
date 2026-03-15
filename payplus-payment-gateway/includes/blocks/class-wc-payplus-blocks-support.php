@@ -69,7 +69,11 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
         $this->iFrameWidth = $this->settings['iframe_width'] ?? '40%';
         $this->hideOtherPayments = boolval(isset($this->settings['hide_other_charge_methods']) && $this->settings['hide_other_charge_methods']) ?? null;
         $this->applePaySettings = get_option('woocommerce_payplus-payment-gateway-applepay_settings');
-        $this->importApplePayScript = boolval(boolval(isset($this->payPlusSettings['enable_apple_pay']) && $this->payPlusSettings['enable_apple_pay'] === 'yes') || boolval(isset($this->applePaySettings['enabled']) && $this->applePaySettings['enabled'] === "yes"));
+        $this->importApplePayScript = boolval(
+            (isset($this->payPlusSettings['enable_apple_pay']) && $this->payPlusSettings['enable_apple_pay'] === 'yes')
+            || (isset($this->applePaySettings['enabled']) && $this->applePaySettings['enabled'] === 'yes')
+            || (isset($this->payPlusSettings['import_applepay_script']) && $this->payPlusSettings['import_applepay_script'] === 'yes')
+        );
         $this->isAutoPPCC = boolval(isset($this->settings['auto_load_payplus_cc_method']) && $this->settings['auto_load_payplus_cc_method'] === 'yes');
         $this->customIcons = array_values(WC_PayPlus_Statics::getCardsLogos());
         $this->secretKey = $this->settings['secret_key'] ?? null;
@@ -253,7 +257,23 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
             $payPlusInvoice = new PayplusInvoice;
             $customer = $payPlusInvoice->payplus_get_client_by_order_id($order_id);
             $data->customer = new stdClass();
-            $data->customer->customer_name = $customer['name'];
+            // Use real billing name for customer_name (matching main gateway behavior)
+            // so tokens are saved with the correct billing identity.
+            // $customer['name'] may contain the invoice name override which breaks token reuse.
+            $billingName = '';
+            if ($WC_PayPlus_Gateway->exist_company && !empty($order->get_billing_company())) {
+                $billingName = $order->get_billing_company();
+            } else {
+                if (!empty($order->get_billing_first_name()) || !empty($order->get_billing_last_name())) {
+                    $billingName = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
+                }
+                if (!$billingName) {
+                    $billingName = $order->get_billing_company();
+                } elseif ($order->get_billing_company()) {
+                    $billingName .= ' (' . $order->get_billing_company() . ')';
+                }
+            }
+            $data->customer->customer_name = !empty($billingName) ? $billingName : $customer['name'];
             $data->customer->email = $customer['email'];
             $data->customer->phone = $customer['phone'];
             $data->customer->address = $customer['street_name'];
@@ -262,10 +282,17 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
             $data->customer->country_iso = $customer['country_iso'];
             $data->customer->customer_external_number = $order->get_customer_id();
 
-            // Add customer_name_invoice if it exists
             $customer_invoice_name = WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_customer_invoice_name');
             if (!empty($customer_invoice_name)) {
                 $data->customer->customer_name_invoice = $customer_invoice_name;
+            }
+
+            // Pass vat_number matching main gateway logic so tokens are saved with consistent identity
+            $customer_other_id = WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_customer_other_id');
+            if (!empty($customer_other_id)) {
+                $data->customer->vat_number = $customer_other_id;
+            } elseif (!empty($options['vat_number_field']) && $order->get_meta($options['vat_number_field'])) {
+                $data->customer->vat_number = $order->get_meta($options['vat_number_field']);
             }
 
             $payingVat = isset($options['paying_vat']) && in_array($options['paying_vat'], [0, 1, 2]) ? $options['paying_vat'] : false;
@@ -323,6 +350,7 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
 
         $hostedResponseArray = json_decode($hostedResponse, true);
         WC_PayPlus_Meta_Data::update_meta($order, ['payplus_page_request_uid' => $hostedResponseArray['data']['page_request_uid']]);
+        WC_PayPlus_Meta_Data::append_pruid_history($order, $hostedResponseArray['data']['page_request_uid'], 'blocks_hosted');
         WC_PayPlus_Meta_Data::update_meta($order, ['payplus_embedded_payload' => $payload]);
         WC_PayPlus_Meta_Data::update_meta($order, ['payplus_embedded_update_page_response' => $hostedResponse]);
 
@@ -382,47 +410,42 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
 
             $WC_PayPlus_Gateway = $this->get_main_payplus_gateway();
             if ($WC_PayPlus_Gateway && !$already_checked && isset($WC_PayPlus_Gateway->enableDoubleCheckIfPruidExists) && $WC_PayPlus_Gateway->enableDoubleCheckIfPruidExists) {
-                $payplus_page_request_uid = WC_PayPlus_Meta_Data::get_meta($this->orderId, 'payplus_page_request_uid', true);
+                $pruid_history = WC_PayPlus_Meta_Data::get_pruid_history($this->orderId);
 
-                if (!empty($payplus_page_request_uid)) {
-                    // Mark as checked in session to prevent duplicate calls
+                if (!empty($pruid_history)) {
                     if (WC()->session) {
                         WC()->session->set($session_key, true);
                     }
 
-                    $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Double check IPN started for Hosted Fields Blocks Order ID: ' . $this->orderId . ' | Page Request UID: ' . $payplus_page_request_uid);
                     $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
                     $_wpnonce = wp_create_nonce('_wp_payplusIpn');
-                    $status = $PayPlusAdminPayments->payplusIpn(
-                        $this->orderId,
-                        $_wpnonce,
-                        $saveToken = false,
-                        $isHostedPayment = true,
-                        $allowUpdateStatuses = true,
-                        $allowReturn = false,
-                        $getInvoice = false,
-                        $moreInfo = false,
-                        $returnStatusOnly = true
-                    );
-                    $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | Page Request UID: ' . $payplus_page_request_uid . ' | Response Status: ' . ($status ? $status : 'null/empty'));
 
-                    if ($status === "processing" || $status === "on-hold" || $status === "approved") {
-                        $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | Status approved - Payment already processed');
-                        // Payment already processed, set result to success
-                        $result->set_status('success');
-                        $payment_details = $result->payment_details;
-                        $payment_details['order_id'] = $this->orderId;
-                        $payment_details['redirect_url'] = $order->get_checkout_order_received_url();
-                        $result->set_payment_details($payment_details);
-                        return;
-                    } else {
-                        $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | Status not approved (' . ($status ? $status : 'null/empty') . ') - Continuing with hosted fields payment');
+                    foreach (array_reverse($pruid_history) as $entry) {
+                        $uid = $entry['uid'];
+                        $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | PRUID: ' . $uid . ' | Source: ' . ($entry['source'] ?? ''));
+                        $status = $PayPlusAdminPayments->payplusIpn(
+                            $this->orderId, $_wpnonce,
+                            false, true, true, false, false, false, true, false,
+                            $uid
+                        );
+                        $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | PRUID: ' . $uid . ' | Response Status: ' . ($status ? $status : 'null/empty'));
+
+                        if ($status === "processing" || $status === "on-hold" || $status === "approved") {
+                            $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | PRUID: ' . $uid . ' | Status approved');
+                            $result->set_status('success');
+                            $payment_details = $result->payment_details;
+                            $payment_details['order_id'] = $this->orderId;
+                            $payment_details['redirect_url'] = $order->get_checkout_order_received_url();
+                            $result->set_payment_details($payment_details);
+                            return;
+                        }
                     }
+                    $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | No approved PRUID found - Continuing');
                 } else {
-                    $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | No Page Request UID found - Skipping double check');
+                    $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | No PRUID history found - Skipping');
                 }
             } elseif ($already_checked && $WC_PayPlus_Gateway) {
-                $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | Already checked in this session - Skipping duplicate check');
+                $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | Already checked - Skipping');
             }
 
             ++$hostedStarted;
@@ -648,8 +671,10 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
             'isAutoPPCC' => $this->isAutoPPCC,
             'importApplePayScript' => $this->importApplePayScript  && !wp_script_is('applePayScript', 'enqueued')  ? PAYPLUS_PLUGIN_URL . 'assets/js/scriptV2.js' . '?ver=' . PAYPLUS_VERSION : false,
             'show_hide_submit_button' => $this->name === 'payplus-payment-gateway-hostedfields' ? $this->settings['show_hide_submit_button'] ?? 'no' : 'no',
+            'show_order_total' => isset($this->hostedFieldsSettings['show_order_total']) && $this->hostedFieldsSettings['show_order_total'] === 'yes',
             'enableDoubleCheckIfPruidExists' => isset($this->payPlusSettings['enable_double_check_if_pruid_exists']) && $this->payPlusSettings['enable_double_check_if_pruid_exists'] === 'yes' ? true : false,
             'popupTvEffect' => isset($this->payPlusSettings['popup_tv_effect']) && $this->payPlusSettings['popup_tv_effect'] === 'yes' ? true : false,
+            'enableOrderStatusPoll' => !isset($this->payPlusSettings['enable_order_status_poll']) || $this->payPlusSettings['enable_order_status_poll'] !== 'no',
             'viewMode' => $this->displayMode !== 'default' ? $this->displayMode : ($this->payPlusSettings['display_mode'] ?? 'redirect'),
             "{$this->name}-settings" => [
                 'displayMode' => $this->displayMode !== 'default' ? $this->displayMode : $this->payPlusSettings['display_mode'],

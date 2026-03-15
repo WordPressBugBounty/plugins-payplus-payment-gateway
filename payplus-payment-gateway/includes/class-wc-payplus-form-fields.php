@@ -721,8 +721,8 @@ class WC_PayPlus_Form_Fields
             'import_applepay_script' => [
                 'title' => __('Apple Pay', 'payplus-payment-gateway'),
                 'type' => 'checkbox',
-                'label' => __('Add Apple Pay Script', 'payplus-payment-gateway'),
-                'description' => __('Include Apple Pay Script', 'payplus-payment-gateway'),
+                'label' => __('Include Apple Pay Script (No matter if Apple Pay is disabled in the PayPlus Gateway)', 'payplus-payment-gateway'),
+                'description' => __('This will include Apple Pay Script for all iframes (Popup, Iframe, Same Page Iframe and Next Page Iframe) - No matter if Apple Pay is disabled in the PayPlus Gateway', 'payplus-payment-gateway'),
                 'desc_tip' => true,
                 'default' => 'yes'
             ],
@@ -778,6 +778,13 @@ class WC_PayPlus_Form_Fields
                 'description' => __('Show a TV power-down animation when closing the popup iframe after successful payment. Only applies to popup iframe mode.', 'payplus-payment-gateway'),
                 'desc_tip' => true,
                 'default' => 'no',
+            ],
+            'enable_order_status_poll' => [
+                'title' => __('Enable Order Status Polling', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'description' => __('Polls the server for order completion while the payment iframe is open. This enables automatic redirect after payment and is required for the TV Power Down Effect. Disabling this may cause the customer to remain on the payment page after completing payment until manually redirected.', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+                'default' => 'yes',
             ],
             'hide_identification_id' => [
                 'title' => __('Hide ID Field In Payment Page', 'payplus-payment-gateway'),

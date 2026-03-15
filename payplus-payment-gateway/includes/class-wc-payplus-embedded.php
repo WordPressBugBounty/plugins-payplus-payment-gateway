@@ -200,7 +200,24 @@ class WC_PayPlus_Embedded extends WC_PayPlus_HostedFields
             $payPlusInvoice = new PayplusInvoice;
             $customer = $payPlusInvoice->payplus_get_client_by_order_id($order_id);
             $data->customer = new stdClass();
-            $data->customer->customer_name = $customer['name'];
+            // Use real billing name for customer_name (matching main gateway behavior)
+            // so tokens are saved with the correct billing identity.
+            // $customer['name'] may contain the invoice name override which breaks token reuse.
+            $gateway = $this->get_payplus_gateway();
+            $billingName = '';
+            if ($gateway->exist_company && !empty($order->get_billing_company())) {
+                $billingName = $order->get_billing_company();
+            } else {
+                if (!empty($order->get_billing_first_name()) || !empty($order->get_billing_last_name())) {
+                    $billingName = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
+                }
+                if (!$billingName) {
+                    $billingName = $order->get_billing_company();
+                } elseif ($order->get_billing_company()) {
+                    $billingName .= ' (' . $order->get_billing_company() . ')';
+                }
+            }
+            $data->customer->customer_name = !empty($billingName) ? $billingName : $customer['name'];
             $data->customer->email = $customer['email'];
             $data->customer->phone = $customer['phone'];
             $data->customer->address = $customer['street_name'];
@@ -209,13 +226,20 @@ class WC_PayPlus_Embedded extends WC_PayPlus_HostedFields
             $data->customer->country_iso = $customer['country_iso'];
             $data->customer->customer_external_number = $order->get_customer_id();
             
-            // Add customer_name_invoice if it exists
             $customer_invoice_name = WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_customer_invoice_name');
             if (!empty($customer_invoice_name)) {
                 $data->customer->customer_name_invoice = $customer_invoice_name;
             }
-            
+
+            // Pass vat_number matching main gateway logic so tokens are saved with consistent identity
             $gateway = $this->get_payplus_gateway();
+            $customer_other_id = WC_PayPlus_Meta_Data::get_meta($order_id, '_billing_customer_other_id');
+            if (!empty($customer_other_id)) {
+                $data->customer->vat_number = $customer_other_id;
+            } elseif ($gateway->vat_number_field && $order->get_meta($gateway->vat_number_field)) {
+                $data->customer->vat_number = $order->get_meta($gateway->vat_number_field);
+            }
+
             $payingVat = isset($gateway->settings['paying_vat']) && in_array($gateway->settings['paying_vat'], [0, 1, 2]) ? $gateway->settings['paying_vat'] : false;
             if ($payingVat) {
                 $payingVat = $payingVat === "0" ? true : false;
@@ -253,6 +277,7 @@ class WC_PayPlus_Embedded extends WC_PayPlus_HostedFields
         $hostedResponse = WC_PayPlus_Statics::createUpdateHostedPaymentPageLink($payload, true);
         $pageRequestUid = json_decode($hostedResponse, true)['data']['page_request_uid'];   
         WC_PayPlus_Meta_Data::update_meta($order, ['payplus_page_request_uid' => $pageRequestUid]);
+        WC_PayPlus_Meta_Data::append_pruid_history($order, $pageRequestUid, 'embedded');
         WC_PayPlus_Meta_Data::update_meta($order, ['payplus_embedded_payload' => $payload]);
         WC_PayPlus_Meta_Data::update_meta($order, ['payplus_embedded_update_page_response' => $hostedResponse]);
         $hostedPayload = WC()->session->set('hostedPayload', $payload);

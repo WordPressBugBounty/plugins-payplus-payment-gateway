@@ -255,36 +255,145 @@ jQuery(document).ready(function ($) {
         }
     });
 
-    $("#custom-button-get-pp").click(function () {
-        let loader = $("#payplus_buttons_metabox").find(".payplus_loader_gpp");
-        let side = "right";
-
-        // check if page is rtl or ltr and change the direction of the loader
-        if ($("body").hasClass("rtl")) {
-            side = "left";
-        }
-
-        loader.css(side, "5%");
-
-        loader.css({
-            position: "absolute",
-            top: "5px",
-        });
-        // $("#custom-button-get-pp").fadeOut();
+    function payplusSendPruidRequest(uid, orderId) {
+        var loader = $("#payplus_buttons_metabox").find(".payplus_loader_gpp");
+        var side = $("body").hasClass("rtl") ? "left" : "right";
+        loader.css(side, "5%").css({ position: "absolute", top: "5px" });
         $("#get-invoice-plus-data").fadeOut();
         loader.fadeIn();
 
-        var data = {
+        $.post(ajaxurl, {
             action: "payplus_ipn",
-            payment_request_uid: $("#custom-button-get-pp").val(),
-            order_id: $("#custom-button-get-pp").data("value"),
+            payment_request_uid: uid,
+            order_id: orderId,
             _ajax_nonce: payplus_script_admin.payplusCustomAction,
-        };
-
-        $.post(ajaxurl, data, function (response) {
+        }, function () {
             loader.fadeOut();
             location.reload();
         });
+    }
+
+    function payplusTryAllPruids(history, orderId, index, box, overlay, initialStatus) {
+        if (index >= history.length) {
+            box.find("tbody tr").css("background", "");
+            box.find(".pp-try-all-status").remove();
+            box.append('<p class="pp-try-all-status" style="margin:12px 0 0;color:#d63638;font-weight:bold;">No approved PRUID found. None returned a successful status.</p>');
+            box.find(".pp-try-all-btn").prop("disabled", false).text("Try All");
+            return;
+        }
+
+        var entry = history[index];
+        var rows = box.find("tbody tr");
+        rows.css("background", "");
+        rows.eq(index).css("background", "#fff8e1");
+        box.find(".pp-try-all-status").remove();
+        box.append('<p class="pp-try-all-status" style="margin:12px 0 0;color:#666;">Checking #' + (index + 1) + ' of ' + history.length + '...</p>');
+
+        $.post(ajaxurl, {
+            action: "payplus_ipn",
+            payment_request_uid: entry.uid,
+            order_id: orderId,
+            _ajax_nonce: payplus_script_admin.payplusCustomAction,
+        }).always(function () {
+            $.post(ajaxurl, {
+                action: "payplus_check_order_status",
+                order_id: orderId,
+                _ajax_nonce: payplus_script_admin.payplusCustomAction,
+            }, function (statusResponse) {
+                var newStatus = statusResponse && statusResponse.data && statusResponse.data.status;
+                if (newStatus && newStatus !== initialStatus && newStatus !== "pending" && newStatus !== "failed" && newStatus !== "cancelled") {
+                    rows.eq(index).css("background", "#e8f5e9");
+                    box.find(".pp-try-all-status").remove();
+                    box.append('<p class="pp-try-all-status" style="margin:12px 0 0;color:#46b450;font-weight:bold;">PRUID #' + (index + 1) + ' matched! Order status: ' + newStatus + '. Reloading...</p>');
+                    setTimeout(function () { location.reload(); }, 1500);
+                } else {
+                    rows.eq(index).css("background", "#ffebee");
+                    payplusTryAllPruids(history, orderId, index + 1, box, overlay, initialStatus);
+                }
+            });
+        });
+    }
+
+    function payplusShowPruidSelectionModal(history, orderId) {
+        $(".pp-pruid-overlay").remove();
+
+        var overlay = $('<div class="pp-pruid-overlay"></div>').css({
+            position: "fixed", top: 0, left: 0, right: 0, bottom: 0,
+            background: "rgba(0,0,0,0.5)", zIndex: 100000,
+            display: "flex", alignItems: "center", justifyContent: "center"
+        });
+
+        var box = $('<div class="pp-pruid-box"></div>').css({
+            background: "#fff", borderRadius: "8px", padding: "24px",
+            minWidth: "420px", maxWidth: "600px", maxHeight: "80vh",
+            overflowY: "auto", boxShadow: "0 4px 24px rgba(0,0,0,0.2)"
+        });
+
+        box.append('<h3 style="margin:0 0 16px;">Select a Page Request UID</h3>');
+
+        var table = $('<table style="width:100%;border-collapse:collapse;"></table>');
+        table.append('<thead><tr>' +
+            '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd;">#</th>' +
+            '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd;">UID</th>' +
+            '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd;">Date</th>' +
+            '<th style="text-align:left;padding:6px 8px;border-bottom:2px solid #ddd;">Source</th>' +
+            '<th style="padding:6px 8px;border-bottom:2px solid #ddd;"></th>' +
+            '</tr></thead>');
+
+        var tbody = $('<tbody></tbody>');
+        for (var i = 0; i < history.length; i++) {
+            var entry = history[i];
+            var shortUid = entry.uid.length > 20 ? entry.uid.substring(0, 20) + "..." : entry.uid;
+            var row = $('<tr></tr>').css("border-bottom", "1px solid #eee");
+            row.append('<td style="padding:6px 8px;">' + (i + 1) + '</td>');
+            row.append('<td style="padding:6px 8px;font-family:monospace;font-size:12px;" title="' + entry.uid + '">' + shortUid + '</td>');
+            row.append('<td style="padding:6px 8px;font-size:12px;">' + (entry.created_at || "N/A") + '</td>');
+            row.append('<td style="padding:6px 8px;font-size:12px;">' + (entry.source || "—") + '</td>');
+            var useBtn = $('<button class="button button-primary" style="font-size:12px;padding:2px 10px;">Use</button>');
+            (function (uid) {
+                useBtn.on("click", function () {
+                    overlay.remove();
+                    payplusSendPruidRequest(uid, orderId);
+                });
+            })(entry.uid);
+            var td = $('<td style="padding:6px 8px;"></td>').append(useBtn);
+            row.append(td);
+            tbody.append(row);
+        }
+        table.append(tbody);
+        box.append(table);
+
+        var footer = $('<div style="margin-top:16px;display:flex;gap:8px;justify-content:flex-end;"></div>');
+        var tryAllBtn = $('<button class="button button-primary pp-try-all-btn" style="padding:4px 16px;">Try All</button>');
+        tryAllBtn.on("click", function () {
+            tryAllBtn.prop("disabled", true).text("Checking...");
+            var currentStatus = $("#order_status").val() || "";
+            currentStatus = currentStatus.replace("wc-", "");
+            payplusTryAllPruids(history, orderId, 0, box, overlay, currentStatus);
+        });
+        var cancelBtn = $('<button class="button" style="padding:4px 16px;">Cancel</button>');
+        cancelBtn.on("click", function () { overlay.remove(); });
+        footer.append(tryAllBtn);
+        footer.append(cancelBtn);
+        box.append(footer);
+
+        overlay.append(box);
+        overlay.on("click", function (e) {
+            if ($(e.target).hasClass("pp-pruid-overlay")) { overlay.remove(); }
+        });
+        $("body").append(overlay);
+    }
+
+    $("#custom-button-get-pp").click(function () {
+        var btn = $(this);
+        var orderId = btn.data("value");
+        var history = btn.data("pruid-history");
+
+        if (history && history.length > 1) {
+            payplusShowPruidSelectionModal(history, orderId);
+        } else {
+            payplusSendPruidRequest(btn.val(), orderId);
+        }
     });
 
     $("#create-invoice-plus-doc").click(function () {

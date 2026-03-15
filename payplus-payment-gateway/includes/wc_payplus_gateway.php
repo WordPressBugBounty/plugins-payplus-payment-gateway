@@ -606,7 +606,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 $outPut[$order_id]['statuses'] = $status;
                 $order = wc_get_order($order_id);
                 $runIpn = true;
-                $paymentPageUid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid') !== "" ? WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid') : false;
+                $pruid_history = WC_PayPlus_Meta_Data::get_pruid_history($order_id);
+                $paymentPageUid = !empty($pruid_history);
                 echo esc_html("\nOrder #$order_id CURRENT STATUS: " . $order->get_status() . "\n");
                 if ($paymentPageUid) {
                     $hasInvoice = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_check_invoice_send');
@@ -660,32 +661,56 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                         echo esc_html("Order #$order_id Customer: $order_customer\n");
                         echo esc_html("Order #$order_id Phone: $order_phone\n");
                         $outPut[$order_id]['message'] = $ipnMessage;
-                        $this->payplus_add_log_all('payplus-orders-verify-log', "$order_id: Running IPN validation.\n");
+                        $this->payplus_add_log_all('payplus-orders-verify-log', "$order_id: Running IPN validation via PRUID history (" . count($pruid_history) . " UIDs).\n");
                         $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
                         $_wpnonce = wp_create_nonce('_wp_payplusIpn');
+                        $original_status = $order->get_status();
 
-                        $ipnResponse = !$reportOnly ? $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce, $saveToken = false, $isHostedPayment = false, $allowUpdateStatuses = true, $allowReturn = true, $getInvoice) : $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce, $saveToken = false, $isHostedPayment = false, $allowUpdateStatuses = false, $allowReturn = true, $getInvoice);
-                        if ($reportOnly) {
-                            echo "Report only mode.\n";
-                        }
-                        if ($ipnResponse) {
-                            if ($getInvoice && is_array($ipnResponse)) {
-                                echo esc_html("Order #$order_id invoices: " . wp_json_encode($ipnResponse) . "\n\n");
-                                $outPut[$order_id]['invoices'] = $ipnResponse;
-                            } else {
-                                if ($getInvoice) {
-                                    echo esc_html("Order #$order_id doesn't seem to have invoice+ docs...\n\n");
-                                    $outPut[$order_id]['message_invoices'] = "Order #$order_id doesn't seem to have invoice+ docs...";
+                        echo esc_html("Order #$order_id PRUID history contains " . count($pruid_history) . " UID(s) — iterating newest first.\n");
+                        $outPut[$order_id]['pruid_count'] = count($pruid_history);
+
+                        foreach (array_reverse($pruid_history) as $entry) {
+                            $uid = $entry['uid'];
+                            $source = $entry['source'] ?? 'legacy';
+                            echo esc_html("  → Trying PRUID: $uid (source: $source)\n");
+                            $outPut[$order_id]['pruid_tried'][] = $uid;
+
+                            $ipnResponse = !$reportOnly
+                                ? $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce, $saveToken = false, $isHostedPayment = false, $allowUpdateStatuses = true, $allowReturn = true, $getInvoice, $moreInfo = false, $returnStatusOnly = false, $isCron = false, $uid)
+                                : $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce, $saveToken = false, $isHostedPayment = false, $allowUpdateStatuses = false, $allowReturn = true, $getInvoice, $moreInfo = false, $returnStatusOnly = false, $isCron = false, $uid);
+
+                            if ($ipnResponse) {
+                                if ($getInvoice && is_array($ipnResponse)) {
+                                    echo esc_html("Order #$order_id invoices: " . wp_json_encode($ipnResponse) . "\n\n");
+                                    $outPut[$order_id]['invoices'] = $ipnResponse;
                                 } else {
-                                    echo esc_html("Order ipn data was updated, #$order_id status is: $ipnResponse\n\n");
-                                    $outPut[$order_id]['status_change'] = $ipnResponse;
+                                    if ($getInvoice) {
+                                        echo esc_html("Order #$order_id doesn't seem to have invoice+ docs...\n\n");
+                                        $outPut[$order_id]['message_invoices'] = "Order #$order_id doesn't seem to have invoice+ docs...";
+                                    } else {
+                                        echo esc_html("Order ipn data was updated, #$order_id status is: $ipnResponse (PRUID: $uid)\n\n");
+                                        $outPut[$order_id]['status_change'] = $ipnResponse;
+                                        $outPut[$order_id]['resolved_by_pruid'] = $uid;
+                                    }
                                 }
                             }
-                        } else {
-                            if ($reportOnly) {
-                                echo esc_html("Order #$order_id status did not change!\n\n");
+
+                            $refreshed_order = wc_get_order($order_id);
+                            $new_status = $refreshed_order ? $refreshed_order->get_status() : $original_status;
+                            if ($new_status !== $original_status) {
+                                echo esc_html("  ✓ Status changed from $original_status to $new_status — stopping PRUID iteration.\n\n");
+                                break;
+                            }
+                        }
+
+                        if ($reportOnly) {
+                            $refreshed_order = wc_get_order($order_id);
+                            $final_status = $refreshed_order ? $refreshed_order->get_status() : $original_status;
+                            if ($final_status === $original_status) {
+                                echo esc_html("Order #$order_id status did not change after all PRUIDs!\n\n");
                                 $outPut[$order_id]['status_change'] = "Order #$order_id status did not change!";
                             }
+                            echo "Report only mode.\n";
                         }
                     }
                 } else {
@@ -1322,12 +1347,18 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                         if (isset($resultApps[$indexRow]->price) && $resultApps[$indexRow]->price > round($amount, $this->rounding_decimals)) {
                             $resultApps[$indexRow]->price = $amount * 100;
                         }
+                        // phpcs:disable WordPress.Security.NonceVerification.Missing -- Nonce verified by WooCommerce before calling process_refund
+                        $refund_vat_type = isset($_POST['payplus_refund_vat_type']) && in_array($_POST['payplus_refund_vat_type'], ['vat-type-included', 'vat-type-exempt'], true)
+                            ? sanitize_text_field(wp_unslash($_POST['payplus_refund_vat_type']))
+                            : null;
+                        // phpcs:enable WordPress.Security.NonceVerification.Missing
                         $this->invoice_api->payPlusCreateRefundInvoicePlus(
                             $order_id,
                             $this->invoice_api->payplus_get_invoice_type_document_refund(),
                             $resultApps,
                             round($amount, $this->rounding_decimals),
-                            'payplus_order_refund' . $order_id
+                            'payplus_order_refund' . $order_id,
+                            $refund_vat_type
                         );
                     }
                     $insertMeta = array(
@@ -1998,38 +2029,32 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $redirect_to = add_query_arg('order-pay', $order_id, add_query_arg('key', $order->get_order_key(), get_permalink(wc_get_page_id('checkout'))));
 
         if ($this->enableDoubleCheckIfPruidExists) {
-            $payplus_page_request_uid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_page_request_uid', true);
+            $pruid_history = WC_PayPlus_Meta_Data::get_pruid_history($order_id);
 
-            if (!empty($payplus_page_request_uid)) {
-                $this->payplus_add_log_all('payplus_double_check', 'Double check IPN started for Order ID: ' . $order_id . ' | Page Request UID: ' . $payplus_page_request_uid);
+            if (!empty($pruid_history)) {
                 $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
                 $_wpnonce = wp_create_nonce('_wp_payplusIpn');
-                $status = $PayPlusAdminPayments->payplusIpn(
-                    $order_id,
-                    $_wpnonce,
-                    $saveToken = false,
-                    $isHostedPayment = false,
-                    $allowUpdateStatuses = true,
-                    $allowReturn = false,
-                    $getInvoice = false,
-                    $moreInfo = false,
-                    $returnStatusOnly = true
-                );
-                $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | Page Request UID: ' . $payplus_page_request_uid . ' | Response Status: ' . ($status ? $status : 'null/empty'));
-                if ($status === "processing" || $status === "on-hold" || $status === "approved") {
-                    $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | Status approved - Redirecting to order received page');
-                    // Use WooCommerce method to get order received URL instead of string replacement
-                    $redirect_to = $order->get_checkout_order_received_url();
-                    $result = [
-                        'result' => 'success',
-                        'redirect' => $redirect_to
-                    ];
-                    return $result;
-                } else {
-                    $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | Status not approved (' . ($status ? $status : 'null/empty') . ') - Continuing with payment page creation');
+
+                foreach (array_reverse($pruid_history) as $entry) {
+                    $uid = $entry['uid'];
+                    $this->payplus_add_log_all('payplus_double_check', 'Double check IPN for Order ID: ' . $order_id . ' | PRUID: ' . $uid . ' | Source: ' . ($entry['source'] ?? ''));
+                    $status = $PayPlusAdminPayments->payplusIpn(
+                        $order_id, $_wpnonce,
+                        false, false, true, false, false, false, true, false,
+                        $uid
+                    );
+                    $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | PRUID: ' . $uid . ' | Response Status: ' . ($status ? $status : 'null/empty'));
+                    if ($status === "processing" || $status === "on-hold" || $status === "approved") {
+                        $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | PRUID: ' . $uid . ' | Status approved - Redirecting');
+                        return [
+                            'result' => 'success',
+                            'redirect' => $order->get_checkout_order_received_url()
+                        ];
+                    }
                 }
+                $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | No approved PRUID found - Continuing with payment page creation');
             } else {
-                $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | No Page Request UID found - Skipping double check');
+                $this->payplus_add_log_all('payplus_double_check', 'Order ID: ' . $order_id . ' | No PRUID history found - Skipping double check');
             }
         }
 
@@ -2055,7 +2080,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $response = $this->receipt_page($order_id, $token);
 
             if (property_exists($response, 'results') && $response->results->status === "error" && $response->results->code === 1) {
-                // Customize the error message here
+                $this->payplus_add_log_all('payload_token_log', '[TOKEN PAYMENT FAILED] Order #' . $order_id . ' | Response: ' . wp_json_encode($response, JSON_UNESCAPED_UNICODE));
                 $error_message = 'This credit card token was saved with different billing information. It cannot be used for this order. Please enter the credit card information manually.';
                 // Translators: %s will be replaced with the error message received from the payment gateway.
                 wc_add_notice(sprintf(__('Error: Credit card declined. %s', 'payplus-payment-gateway'), $error_message), 'error');
@@ -2523,7 +2548,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 }
 
                 if ($productPrice) {
-                    $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+                    $productsItems[] = ($json) ? wp_json_encode($itemDetails, JSON_UNESCAPED_UNICODE) : $itemDetails;
                 }
             }
         }
@@ -2538,7 +2563,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 'is_summary_item' => true,
 
             ];
-            $productsItems[] = ($json) ? wp_json_encode($itemDetails) : (object) $itemDetails;
+            $productsItems[] = ($json) ? wp_json_encode($itemDetails, JSON_UNESCAPED_UNICODE) : (object) $itemDetails;
             $totalCartAmount += $productPrice;
         }
 
@@ -2578,7 +2603,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     'quantity' => 1,
                     'price' => $productPrice,
                 ];
-                $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+                $productsItems[] = ($json) ? wp_json_encode($itemDetails, JSON_UNESCAPED_UNICODE) : $itemDetails;
                 $totalCartAmount += $productPrice;
             }
         }
@@ -2608,7 +2633,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                         'quantity' => 1,
                         'price' => round($shippingTC, $this->rounding_decimals),
                     ];
-                    $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+                    $productsItems[] = ($json) ? wp_json_encode($itemDetails, JSON_UNESCAPED_UNICODE) : $itemDetails;
                     $totalCartAmount += $shippingTC;
                 }
                 if ($totalCartAmount < $orderTotal) {
@@ -2619,7 +2644,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                             'quantity' => 1,
                             'price' => $productPrice,
                         ];
-                        $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+                        $productsItems[] = ($json) ? wp_json_encode($itemDetails, JSON_UNESCAPED_UNICODE) : $itemDetails;
                         $totalCartAmount += $productPrice;
                     }
                 }
@@ -2643,7 +2668,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 'quantity' => 1,
                 'price' => round($productCouponPrice, $this->rounding_decimals),
             ];
-            $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+            $productsItems[] = ($json) ? wp_json_encode($itemDetails, JSON_UNESCAPED_UNICODE) : $itemDetails;
         }
 
         if (isset($this->pwGiftCardData) && isset($this->pwGiftCardData['gift_cards']) && is_array($this->pwGiftCardData['gift_cards'])) {
@@ -2660,7 +2685,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     'price' => $priceGift,
                 ];
 
-                $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+                $productsItems[] = ($json) ? wp_json_encode($itemDetails, JSON_UNESCAPED_UNICODE) : $itemDetails;
                 $totalCartAmount += $priceGift;
             }
         }
@@ -2683,7 +2708,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 'quantity' => 1,
                 'price' => $priceGift,
             ];
-            $productsItems[] = ($json) ? wp_json_encode($itemDetails) : $itemDetails;
+            $productsItems[] = ($json) ? wp_json_encode($itemDetails, JSON_UNESCAPED_UNICODE) : $itemDetails;
             $totalCartAmount += $priceGift;
         }
 
@@ -2741,7 +2766,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $objectProducts = $this->payplus_get_products_by_order_id($order_id);
         }
 
-        $Customer = (count($customer)) ? '"customer":' . wp_json_encode($customer) . "," : "";
+        $Customer = (count($customer)) ? '"customer":' . wp_json_encode($customer, JSON_UNESCAPED_UNICODE) . "," : "";
         $payloadCustomer = count($customer) ? $customer : "";
         $returnUrl = add_query_arg('wc-api', 'payplus_gateway', $this->get_return_url($order));
         $redirectSuccess = ($isAdmin) ? $this->response_url . "&paymentPayPlusDashboard=" . $this->payplus_generate_key_dashboard . "&_wpnonce=" . wp_create_nonce('payload_link') : $this->response_url . "&success_order_id=$order_id&_wpnonce=" . wp_create_nonce('payload_link');
@@ -2926,7 +2951,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         // $this->payplus_add_log_all("generate_payment_link_refactor_log", "New payload: \n" . wp_json_encode($payload) . "\n");
         // $this->payplus_add_log_all("generate_payment_link_refactor_log", "Legacy payload: \n" . wp_json_encode($payloadArray) . "\n");
 
-        $this->useLegacyPayload ? $payload = wp_json_encode($payloadArray) : $payload = wp_json_encode($payload);
+        $this->useLegacyPayload ? $payload = wp_json_encode($payloadArray, JSON_UNESCAPED_UNICODE) : $payload = wp_json_encode($payload, JSON_UNESCAPED_UNICODE);
         return $payload;
     }
 
@@ -3031,6 +3056,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     if (property_exists($res->data, 'page_request_uid')) {
                         $pageRequestUid = array('payplus_page_request_uid' => $res->data->page_request_uid);
                         WC_PayPlus_Meta_Data::update_meta($order, $pageRequestUid);
+                        WC_PayPlus_Meta_Data::append_pruid_history($order, $res->data->page_request_uid, 'main_gateway');
                     }
                 } catch (Exception $e) {
                     // Translators: %s is the error message retrieved from the exception.
