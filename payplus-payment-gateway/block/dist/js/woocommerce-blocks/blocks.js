@@ -11,16 +11,331 @@ const isCheckout = !document.querySelector(
     ? false
     : true;
 
-if (isCheckout || hasOrder) {
-    console.log("checkout page?", isCheckout);
-    console.log("has order?", hasOrder);
+const isEditor = !!document.querySelector('.block-editor');
 
-    const customerId = store.getCustomerId();
-    const additionalFields = store.getAdditionalFields();
-    const orderId = store.getOrderId();
-    const payPlusGateWay = window.wc.wcSettings.getPaymentMethodData(
-        "payplus-payment-gateway"
-    );
+const payPlusGateWay = window.wc.wcSettings.getPaymentMethodData(
+    "payplus-payment-gateway"
+) || {};
+
+let gateways = (payPlusGateWay.gateways || []).slice();
+
+gateways = payPlusGateWay.isSubscriptionOrder
+    ? ["payplus-payment-gateway"]
+    : gateways;
+
+gateways =
+    payPlusGateWay.isSubscriptionOrder && payPlusGateWay.isLoggedIn
+        ? [
+              "payplus-payment-gateway",
+              "payplus-payment-gateway-hostedfields",
+          ]
+        : gateways;
+
+let customIcons = [];
+
+const w = window.React;
+for (let c = 0; c < (payPlusGateWay.customIcons || []).length; c++) {
+    customIcons[c] = (0, w.createElement)("img", {
+        src: payPlusGateWay.customIcons[c],
+        style: { maxHeight: "35px", height: "45px" },
+    });
+}
+
+const divCustomIcons = (0, w.createElement)(
+    "div",
+    {
+        className: "payplus-icons",
+        style: {
+            display: "flex",
+            flexWrap: "wrap",
+            width: "100%",
+            maxWidth: "100%",
+            gap: "5px",
+        },
+    },
+    customIcons
+);
+
+let isCustomeIcons = !!(payPlusGateWay.customIcons && payPlusGateWay.customIcons[0] && payPlusGateWay.customIcons[0].length);
+const hasSavedTokens =
+    payPlusGateWay.hasSavedTokens ? Object.keys(payPlusGateWay.hasSavedTokens).length > 0 : false;
+const hideMainPayPlusGateway = payPlusGateWay.hideMainPayPlusGateway;
+const hostedFieldsIsMain = payPlusGateWay.hostedFieldsIsMain;
+
+(() => {
+    ("use strict");
+    const e = window.React,
+        t = window.wc.wcBlocksRegistry,
+        a = window.wp.i18n,
+        p = window.wc.wcSettings,
+        n = window.wp.htmlEntities,
+        i = gateways,
+        s = (e) => (0, n.decodeEntities)(e.description || ""),
+        y = (t) => {
+            const { PaymentMethodLabel: a } = t.components;
+            return (0, e.createElement)(
+                "div",
+                { className: "payplus-method", style: { width: "100%" } },
+                (0, e.createElement)(a, {
+                    text: t.text,
+                    icon:
+                        t.icon !== ""
+                            ? (0, e.createElement)("img", {
+                                  style: {
+                                      width: "64px",
+                                      height: "32px",
+                                      maxHeight: "100%",
+                                      margin: "0px 10px",
+                                      objectPosition: "center",
+                                  },
+                                  src: t.icon,
+                              })
+                            : null,
+                }),
+                (0, e.createElement)(
+                    "div",
+                    { className: "pp_iframe" },
+                    (0, e.createElement)(
+                        "button",
+                        {
+                            className: "closeFrame",
+                            id: "closeFrame",
+                            style: {
+                                position: "absolute",
+                                top: "0px",
+                                fontSize: "20px",
+                                right: "0px",
+                                border: "none",
+                                color: "black",
+                                backgroundColor: "transparent",
+                                display: "none",
+                            },
+                        },
+                        "x"
+                    )
+                ),
+                t.icon && t.icon.search("PayPlusLogo.svg") > 0 && isCustomeIcons
+                    ? divCustomIcons
+                    : null
+            );
+        };
+    (() => {
+        for (let c = 0; c < i.length; c++) {
+            const l = i[c],
+                o = (0, p.getPaymentMethodData)(l, {}),
+                m = (0, a.__)(
+                    "Pay with Debit or Credit Card",
+                    "payplus-payment-gateway"
+                ),
+                r = (0, n.decodeEntities)(o?.title || "") || m,
+                wObj = {
+                    name: l,
+                    label: (0, e.createElement)(y, {
+                        text: r,
+                        icon: o.icon,
+                    }),
+                    content: (0, e.createElement)(s, {
+                        description: o.description,
+                    }),
+                    edit: (0, e.createElement)(s, {
+                        description: o.description,
+                    }),
+                    canMakePayment: () => !0,
+                    ariaLabel: r,
+                    supports: {
+                        showSaveOption:
+                            l === "payplus-payment-gateway"
+                                ? o.showSaveOption
+                                : false,
+                        features: o.supports,
+                    },
+                };
+            (0, t.registerPaymentMethod)(wObj);
+        }
+    })();
+})();
+
+if (isCheckout || hasOrder) {
+
+    var _checkoutDispatch = wp.data.dispatch(CHECKOUT_STORE_KEY);
+    var _paymentDispatch = wp.data.dispatch(PAYMENT_STORE_KEY);
+
+    // Will be assigned from within DOMContentLoaded so resetCheckoutState can re-attach the observer
+    var _startObserving = null;
+
+    // True while an iframe/popup payment page is showing or hosted-fields is mid-submission.
+    // Used by the cart-total watcher to auto-reset when the total changes under an active payment.
+    var _paymentPageActive = false;
+
+    /**
+     * Reset the Blocks checkout state machine so the customer can
+     * change payment method and click "Place Order" again without reloading.
+     */
+    function resetCheckoutState() {
+        _paymentPageActive = false;
+
+        // Stop any running poll
+        _payplusPollDone = true;
+        _payplusPollStarted = false;
+        if (_payplusPollTimerId) {
+            clearInterval(_payplusPollTimerId);
+            _payplusPollTimerId = null;
+        }
+
+        // Hide & clean up the iframe popup (payment-page flows only)
+        var ppIframes = document.querySelectorAll('.pp_iframe');
+        ppIframes.forEach(function (el) {
+            el.style.display = 'none';
+            var iframeChild = el.querySelector('iframe');
+            if (iframeChild) iframeChild.remove();
+        });
+
+        // Remove overlay
+        var overlay = document.getElementById('overlay');
+        if (overlay) overlay.remove();
+
+        // Restore body scroll & appearance (also undoes hosted-fields dimming)
+        document.body.style.overflow = '';
+        document.body.style.backgroundColor = '';
+        document.body.style.opacity = '';
+
+        // Hide hosted-fields loader if it was shown
+        var hfLoader = document.querySelector('.blocks-payplus_loader_hosted');
+        if (hfLoader) hfLoader.style.display = 'none';
+
+        // Re-enable inputs that hosted-fields disabled before submission
+        document.querySelectorAll('input:disabled').forEach(function (inp) {
+            inp.disabled = false;
+        });
+
+        // Reset WC Blocks stores back to idle so the button re-enables
+        try { _checkoutDispatch.__internalSetIdle(); } catch (e) {}
+        try { _paymentDispatch.__internalSetPaymentIdle(); } catch (e) {}
+
+        // Allow the next Place Order click to re-trigger the observer
+        _payplusPollDone = false;
+
+        // Re-attach the observer after a tick so isComplete() is no longer true
+        if (_startObserving) {
+            setTimeout(function () { _startObserving(); }, 150);
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Watch for cart-total changes while a payment page / hosted-fields
+    // session is active.  When the total changes the open page has stale
+    // data so we must tear it down and let the customer re-submit.
+    // -------------------------------------------------------------------
+    (function () {
+        var CART_KEY = window.wc.wcBlocksData.CART_STORE_KEY;
+        var cartSelect = wp.data.select(CART_KEY);
+        var lastTotal = null;
+
+        try { lastTotal = cartSelect.getCartTotals().total_price; } catch (e) {}
+
+        wp.data.subscribe(function () {
+            var currentTotal;
+            try { currentTotal = cartSelect.getCartTotals().total_price; } catch (e) { return; }
+
+            if (lastTotal !== null && currentTotal !== lastTotal && _paymentPageActive) {
+                console.log('PayPlus: cart total changed while payment page active — resetting');
+                lastTotal = currentTotal;
+                resetCheckoutState();
+                return;
+            }
+            lastTotal = currentTotal;
+        });
+    })();
+
+    // -------------------------------------------------------------------
+    // Watch for payment-method changes in Blocks checkout.  When the
+    // customer picks a different gateway we update chosen_payment_method
+    // in the WC session so woocommerce_cart_calculate_fees can decide
+    // whether to add the Weight Estimate fee, then invalidate the cart
+    // so totals refresh.  Also fires once on initial load so the session
+    // is in sync with the auto-selected method after a page reload.
+    // -------------------------------------------------------------------
+    (function () {
+        var CART_KEY = window.wc.wcBlocksData.CART_STORE_KEY;
+        var lastMethod = null;
+        var synced = false;
+
+        function syncMethod(method) {
+            var ajaxUrl = payPlusGateWay.ajax_url || (window.payplus_script && window.payplus_script.ajax_url);
+            var nonce = payPlusGateWay.frontNonce || (window.payplus_script && window.payplus_script.frontNonce);
+            if (!ajaxUrl || !method) return;
+
+            jQuery.ajax({
+                url: ajaxUrl,
+                type: 'POST',
+                data: {
+                    action: 'payplus_set_payment_method',
+                    _ajax_nonce: nonce,
+                    payment_method: method
+                },
+                success: function () {
+                    try {
+                        wp.data.dispatch(CART_KEY).invalidateResolutionForStoreSelector('getCartData');
+                    } catch (ignore) {}
+                }
+            });
+        }
+
+        wp.data.subscribe(function () {
+            var currentMethod;
+            try { currentMethod = payment.getActivePaymentMethod(); } catch (e) { return; }
+            if (!currentMethod) return;
+
+            if (!synced) {
+                synced = true;
+                lastMethod = currentMethod;
+                syncMethod(currentMethod);
+                return;
+            }
+
+            if (currentMethod !== lastMethod) {
+                lastMethod = currentMethod;
+                syncMethod(currentMethod);
+            }
+        });
+    })();
+
+    // -------------------------------------------------------------------
+    // Inject the Weight Estimate fee message below the fee row in Blocks
+    // checkout, mirroring the woocommerce_cart_totals_fee_html filter
+    // used for classic checkout.
+    // -------------------------------------------------------------------
+    (function () {
+        var feeName = payPlusGateWay.weightEstimateFeeName;
+        var feeMessage = payPlusGateWay.weightEstimateFeeMessage;
+        if (!feeMessage) return;
+
+        var observer = new MutationObserver(function () {
+            var feeRows = document.querySelectorAll('.wc-block-components-totals-fees .wc-block-components-totals-item');
+            if (!feeRows.length) {
+                feeRows = document.querySelectorAll('.wc-block-components-totals-item');
+            }
+            feeRows.forEach(function (row) {
+                var label = row.querySelector('.wc-block-components-totals-item__label');
+                if (!label) return;
+                if (label.textContent.trim() !== feeName) return;
+                if (row.querySelector('.pp-weight-estimate-msg')) return;
+
+                var msg = document.createElement('small');
+                msg.className = 'pp-weight-estimate-msg';
+                msg.style.cssText = 'display:block;font-size:0.8em;opacity:0.8;margin-top:2px;';
+                msg.textContent = feeMessage;
+                var desc = row.querySelector('.wc-block-components-totals-item__description');
+                if (desc) {
+                    desc.appendChild(msg);
+                } else {
+                    label.parentNode.appendChild(msg);
+                }
+            });
+        });
+
+        observer.observe(document.body, { childList: true, subtree: true });
+    })();
 
     function addScriptApple() {
         if (isMyScriptLoaded(payPlusGateWay.importApplePayScript)) {
@@ -40,53 +355,6 @@ if (isCheckout || hasOrder) {
         return true;
     }
 
-    let gateways = window.wc.wcSettings.getPaymentMethodData(
-        "payplus-payment-gateway"
-    ).gateways;
-
-    gateways = payPlusGateWay.isSubscriptionOrder
-        ? ["payplus-payment-gateway"]
-        : gateways;
-
-    gateways =
-        payPlusGateWay.isSubscriptionOrder && payPlusGateWay.isLoggedIn
-            ? [
-                  "payplus-payment-gateway",
-                  "payplus-payment-gateway-hostedfields",
-              ]
-            : gateways;
-
-    let customIcons = [];
-
-    const w = window.React;
-    for (let c = 0; c < payPlusGateWay.customIcons?.length; c++) {
-        customIcons[c] = (0, w.createElement)("img", {
-            src: payPlusGateWay.customIcons[c],
-            style: { maxHeight: "35px", height: "45px" },
-        });
-    }
-
-    const divCustomIcons = (0, w.createElement)(
-        "div",
-        {
-            className: "payplus-icons",
-            style: {
-                display: "flex",
-                flexWrap: "wrap",
-                width: "100%",
-                maxWidth: "100%",
-                gap: "5px",
-            },
-        },
-        customIcons
-    );
-
-    let isCustomeIcons = !!payPlusGateWay.customIcons[0]?.length;
-    const hasSavedTokens =
-        Object.keys(payPlusGateWay.hasSavedTokens).length > 0;
-    const hideMainPayPlusGateway = payPlusGateWay.hideMainPayPlusGateway;
-    const hostedFieldsIsMain = payPlusGateWay.hostedFieldsIsMain;
-
     // Auto-select hosted fields if hostedFieldsIsMain is true
     if (hostedFieldsIsMain) {
         const { dispatch } = window.wp.data;
@@ -102,55 +370,10 @@ if (isCheckout || hasOrder) {
 
     // Prevent double redirects when both postMessage and polling fire
     var _payplusPollDone = false;
-    var _payplusTvEffectInProgress = false; // flag to prevent multiple redirects during TV effect
+    var _payplusPollTimerId = null;
 
-    // Helper: trigger TV power-down effect before redirect (BLOCKS CHECKOUT)
-    function redirectWithTvEffect(url) {
-        // Prevent multiple calls
-        if (_payplusTvEffectInProgress) {
-            return;
-        }
-        
-        // Only apply TV effect if:
-        // 1. Feature is enabled (popupTvEffect setting)
-        // 2. .pp_iframe container exists
-        // 3. viewMode is popupIframe (trust the setting, not the CSS)
-        if (
-            payPlusGateWay && 
-            payPlusGateWay.popupTvEffect &&
-            payPlusGateWay.viewMode === 'popupIframe' &&
-            jQuery('.pp_iframe').length > 0
-        ) {
-            _payplusTvEffectInProgress = true;
-            _payplusPollDone = true; // Stop polling from redirecting
-            
-            var $popup = jQuery('.pp_iframe');
-            
-            // FORCE the correct popup positioning (in case something overrode it)
-            $popup.css({
-                'position': 'fixed',
-                'top': '50%',
-                'left': '50%',
-                'transform': 'translate(-50%, -50%)',
-                'z-index': '100000'
-            });
-            
-            // Add TV closing class to the .pp_iframe container div
-            $popup.addClass('tv-closing-blocks');
-            
-            // Force a reflow to ensure CSS is applied
-            $popup[0].offsetHeight;
-            
-            // Wait for animation to complete (1000ms) then redirect
-            setTimeout(function() {
-                window.location.href = url;
-            }, 1050);
-            
-            // IMPORTANT: Return without redirecting immediately
-            return;
-        }
-        
-        // No TV effect, redirect immediately
+    function payplusRedirect(url) {
+        jQuery('.pp_iframe').hide();
         window.location.href = url;
     }
 
@@ -164,7 +387,7 @@ if (isCheckout || hasOrder) {
             var u = new URL(e.data.url, window.location.origin);
             if (u.origin === window.location.origin) {
                 _payplusPollDone = true;
-                redirectWithTvEffect(e.data.url);
+                payplusRedirect(e.data.url);
             }
         } catch (err) {
             // ignore invalid URL
@@ -178,6 +401,13 @@ if (isCheckout || hasOrder) {
         if (_payplusPollStarted) return;
         _payplusPollStarted = true;
         if (!result || !result.order_id || !result.order_received_url) return;
+
+        // Clear any previous poll so we start fresh for this order
+        if (_payplusPollTimerId) {
+            clearInterval(_payplusPollTimerId);
+            _payplusPollTimerId = null;
+        }
+        _payplusPollDone = false;
 
         var redirectUrl = result.order_received_url;
         var orderKey = '';
@@ -215,7 +445,7 @@ if (isCheckout || hasOrder) {
                         if (status === 'processing' || status === 'completed' ||
                             status === 'wc-processing' || status === 'wc-completed') {
                             _payplusPollDone = true;
-                            redirectWithTvEffect(response.data.redirect_url || redirectUrl);
+                            payplusRedirect(response.data.redirect_url || redirectUrl);
                         }
                     }
                 }
@@ -223,107 +453,15 @@ if (isCheckout || hasOrder) {
         }
 
         poll();
-        var pollTimer = setInterval(function () {
+        _payplusPollTimerId = setInterval(function () {
             if (_payplusPollDone) {
-                clearInterval(pollTimer);
+                clearInterval(_payplusPollTimerId);
+                _payplusPollTimerId = null;
                 return;
             }
             poll();
         }, 2000);
     }
-
-    (() => {
-        ("use strict");
-        const e = window.React,
-            t = window.wc.wcBlocksRegistry,
-            a = window.wp.i18n,
-            p = window.wc.wcSettings,
-            n = window.wp.htmlEntities,
-            i = gateways,
-            s = (e) => (0, n.decodeEntities)(e.description || ""),
-            y = (t) => {
-                const { PaymentMethodLabel: a } = t.components;
-                return (0, e.createElement)(
-                    "div",
-                    { className: "payplus-method", style: { width: "100%" } },
-                    (0, e.createElement)(a, {
-                        text: t.text,
-                        icon:
-                            t.icon !== ""
-                                ? (0, e.createElement)("img", {
-                                      style: {
-                                          width: "64px",
-                                          height: "32px",
-                                          maxHeight: "100%",
-                                          margin: "0px 10px",
-                                          objectPosition: "center",
-                                      },
-                                      src: t.icon,
-                                  })
-                                : null,
-                    }),
-                    (0, e.createElement)(
-                        "div",
-                        { className: "pp_iframe" },
-                        (0, e.createElement)(
-                            "button",
-                            {
-                                className: "closeFrame",
-                                id: "closeFrame",
-                                style: {
-                                    position: "absolute",
-                                    top: "0px",
-                                    fontSize: "20px",
-                                    right: "0px",
-                                    border: "none",
-                                    color: "black",
-                                    backgroundColor: "transparent",
-                                    display: "none",
-                                },
-                            },
-                            "x"
-                        )
-                    ),
-                    t.icon.search("PayPlusLogo.svg") > 0 && isCustomeIcons
-                        ? divCustomIcons
-                        : null
-                );
-            };
-        (() => {
-            for (let c = 0; c < i.length; c++) {
-                const l = i[c],
-                    o = (0, p.getPaymentMethodData)(l, {}),
-                    m = (0, a.__)(
-                        "Pay with Debit or Credit Card",
-                        "payplus-payment-gateway"
-                    ),
-                    r = (0, n.decodeEntities)(o?.title || "") || m,
-                    w = {
-                        name: l,
-                        label: (0, e.createElement)(y, {
-                            text: r,
-                            icon: o.icon,
-                        }),
-                        content: (0, e.createElement)(s, {
-                            description: o.description,
-                        }),
-                        edit: (0, e.createElement)(s, {
-                            description: o.description,
-                        }),
-                        canMakePayment: () => !0,
-                        ariaLabel: r,
-                        supports: {
-                            showSaveOption:
-                                l === "payplus-payment-gateway"
-                                    ? o.showSaveOption
-                                    : false,
-                            features: o.supports,
-                        },
-                    };
-                (0, t.registerPaymentMethod)(w);
-            }
-        })();
-    })();
 
     // Order total display inside hosted fields (blocks checkout)
     const showOrderTotalSetting = (function() {
@@ -389,6 +527,7 @@ if (isCheckout || hasOrder) {
 
         function startObserving(event) {
             console.log("observer started");
+            _startObserving = startObserving;
 
             const overlay = document.createElement("div");
             overlay.style.backgroundColor = "rgba(0, 0, 0, 0.5)";
@@ -507,6 +646,22 @@ if (isCheckout || hasOrder) {
                         parentDiv.style.display = "none";
                     }
                 }
+                // Show hosted-fields loader as soon as checkout starts processing
+                // (before the Store API response arrives) so the user gets
+                // immediate visual feedback instead of waiting 5+ seconds.
+                if (
+                    activePaymentMethod.search("payplus-payment-gateway-hostedfields") === 0 &&
+                    store.isProcessing && store.isProcessing()
+                ) {
+                    var hfLoaderEl = document.querySelector('.blocks-payplus_loader_hosted');
+                    if (hfLoaderEl && hfLoaderEl.style.display !== 'block') {
+                        hfLoaderEl.style.display = 'block';
+                        document.body.style.overflow = 'hidden';
+                        document.body.style.backgroundColor = 'white';
+                        document.body.style.opacity = '0.7';
+                    }
+                }
+
                 if (store.hasError()) {
                     try {
                         let getPaymentResult = payment.getPaymentResult();
@@ -557,7 +712,7 @@ if (isCheckout || hasOrder) {
                         pp_iframe.addEventListener("click", (e) => {
                             e.preventDefault();
                             pp_iframe.style.display = "none";
-                            location.reload();
+                            resetCheckoutState();
                         });
                         console.log(
                             getPaymentResult.paymentDetails.errorMessage
@@ -584,6 +739,7 @@ if (isCheckout || hasOrder) {
                             "payplus-payment-gateway-hostedfields"
                         ) === 0
                     ) {
+                        _paymentPageActive = true;
                         hf.SubmitPayment();
                         document.body.style.overflow = "hidden";
                         document.body.style.backgroundColor = "white";
@@ -597,11 +753,14 @@ if (isCheckout || hasOrder) {
                         inputs.forEach((input) => {
                             input.disabled = true;
                         });
-                        hf.Upon("pp_responseFromServer", (e) => {
-                            if (e.detail.errors) {
-                                location.reload();
-                            }
-                        });
+                        if (!window._ppHfResponseHandlerRegistered) {
+                            window._ppHfResponseHandlerRegistered = true;
+                            hf.Upon("pp_responseFromServer", (e) => {
+                                if (e.detail.errors || e.detail?.data?.error || e.detail?.data?.status === "reject") {
+                                    resetCheckoutState();
+                                }
+                            });
+                        }
                         return;
                     }
 
@@ -672,14 +831,14 @@ if (isCheckout || hasOrder) {
                                                         ? window.payplus_i18n.payment_page_failed
                                                         : 'Error: the payment page failed to load.');
                                                 alert(errMsg);
-                                                location.reload();
+                                                resetCheckoutState();
                                             }
                                         },
                                         error: function() {
                                             alert((window.payplus_i18n && window.payplus_i18n.payment_page_failed)
                                                 ? window.payplus_i18n.payment_page_failed
                                                 : 'Error: the payment page failed to load.');
-                                            location.reload();
+                                            resetCheckoutState();
                                         }
                                     });
                                 } else if (paymentDetails.paymentPageLink && paymentDetails.paymentPageLink.length > 0) {
@@ -698,7 +857,7 @@ if (isCheckout || hasOrder) {
                                             ? window.payplus_i18n.payment_page_failed
                                             : "Error: the payment page failed to load."
                                     );
-                                    location.reload();
+                                    resetCheckoutState();
                                 }
                             }
                             observer.disconnect();
@@ -716,6 +875,7 @@ if (isCheckout || hasOrder) {
     });
 
     function startIframe(paymentPageLink, overlay, loader) {
+        _paymentPageActive = true;
         document.body.appendChild(overlay);
         overlay.appendChild(loader);
         const activePaymentMethod = payment.getActivePaymentMethod();
@@ -807,10 +967,7 @@ if (isCheckout || hasOrder) {
             pp_iframe.firstElementChild.style.cursor = "pointer";
             pp_iframe.firstElementChild.addEventListener("click", (e) => {
                 e.preventDefault();
-                pp_iframe.style.display = "none";
-                var currentUrl = window.location.href;
-                var params = new URLSearchParams(currentUrl);
-                location.reload();
+                resetCheckoutState();
             });
             pp_iframe.appendChild(iframe);
         }

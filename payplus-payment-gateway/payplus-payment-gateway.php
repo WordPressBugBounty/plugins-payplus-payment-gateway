@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.1.5
+ * Version: 8.1.6
  * Tested up to: 6.9
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.1.5');
-define('PAYPLUS_VERSION_DB', 'payplus_8_1_5');
+define('PAYPLUS_VERSION', '8.1.6');
+define('PAYPLUS_VERSION_DB', 'payplus_8_1_6');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -44,7 +44,6 @@ class WC_PayPlus
     public $hidePayPlusGatewayNMW;
     public $pwGiftCardData;
     public $iframeAutoHeight;
-    public $popupTvEffect;
 
     /**
      * The main PayPlus gateway instance. Use get_main_payplus_gateway() to access it.
@@ -74,7 +73,6 @@ class WC_PayPlus
         $this->secret_key = $is_test_mode ? ($this->payplus_payment_gateway_settings->dev_secret_key ?? null) : ($this->payplus_payment_gateway_settings->secret_key ?? null);
         $this->hidePayPlusGatewayNMW = boolval(property_exists($this->payplus_payment_gateway_settings, 'hide_main_pp_checkout') && $this->payplus_payment_gateway_settings->hide_main_pp_checkout === 'yes');
         $this->iframeAutoHeight = boolval(property_exists($this->payplus_payment_gateway_settings, 'iframe_auto_height') && $this->payplus_payment_gateway_settings->iframe_auto_height === 'yes');
-        $this->popupTvEffect = boolval(property_exists($this->payplus_payment_gateway_settings, 'popup_tv_effect') && $this->payplus_payment_gateway_settings->popup_tv_effect === 'yes');
 
         add_action('plugins_loaded', [$this, 'load_textdomain'], 0); // Load first for gateway settings
         add_action('admin_init', [$this, 'check_environment']);
@@ -111,9 +109,15 @@ class WC_PayPlus
         add_action('woocommerce_thankyou', [$this, 'payplus_clear_pw_gift_cards_session'], 10, 1);
         add_action('wp_footer', [$this, 'payplus_thankyou_iframe_redirect_script'], 5);
 
+        add_action('woocommerce_cart_calculate_fees', [$this, 'maybe_add_weight_estimate_fee']);
+
+        add_action('wp_ajax_payplus_set_payment_method', [$this, 'ajax_set_payment_method']);
+        add_action('wp_ajax_nopriv_payplus_set_payment_method', [$this, 'ajax_set_payment_method']);
+
         //FILTER
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), [$this, 'plugin_action_links']);
         add_filter('woocommerce_available_payment_gateways', [$this, 'payplus_applepay_disable_manager']);
+        add_filter('woocommerce_cart_totals_fee_html', [$this, 'weight_estimate_fee_html'], 10, 2);
         add_filter('cron_schedules', [$this, 'payplus_add_custom_cron_schedule']);
         add_filter('pwgc_redeeming_session_data', [$this, 'modify_gift_card_session_data'], 10, 2);
 
@@ -939,7 +943,7 @@ class WC_PayPlus
             if ($current_hour >= $hour - 2) {
                 $pruid_history = WC_PayPlus_Meta_Data::get_pruid_history($order_id);
                 $paymentPageUid = !empty($pruid_history);
-                $payPlusCronTested = !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_cron_tested')) ? WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_cron_tested') : 1;
+                $payPlusCronTested = !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_cron_tested')) ? WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_cron_tested') : 0;
                 if ($paymentPageUid && $payPlusCronTested < 5) {
                     ++$payPlusCronTested;
                     if ($status === 'cancelled' || $status === 'wc-cancelled') {
@@ -1260,6 +1264,22 @@ class WC_PayPlus
      * payload and runs payPlusRemote() after the checkout form has already unblocked,
      * so the 7-10 s PayPlus API delay is hidden behind the loading overlay.
      */
+
+    /**
+     * AJAX: set the chosen_payment_method in the WC session.
+     * Used by Blocks checkout so that woocommerce_cart_calculate_fees can
+     * read the active payment method and conditionally add fees.
+     */
+    public function ajax_set_payment_method()
+    {
+        check_ajax_referer('frontNonce', '_ajax_nonce');
+        $method = isset($_POST['payment_method']) ? sanitize_text_field(wp_unslash($_POST['payment_method'])) : '';
+        if ($method && WC()->session) {
+            WC()->session->set('chosen_payment_method', $method);
+        }
+        wp_send_json_success();
+    }
+
     public function ajax_get_iframe_link()
     {
         check_ajax_referer('frontNonce', '_ajax_nonce');
@@ -1794,7 +1814,6 @@ body{
                             'frontNonce' => wp_create_nonce('frontNonce'),
                             "isSubscriptionOrder" => $isSubscriptionOrder,
                             "iframeAutoHeight" => $this->iframeAutoHeight,
-                            "popupTvEffect" => $this->popupTvEffect,
                             "enableOrderStatusPoll" => !property_exists($this->payplus_payment_gateway_settings, 'enable_order_status_poll') || $this->payplus_payment_gateway_settings->enable_order_status_poll !== 'no',
                             "viewMode" => $this->payplus_payment_gateway_settings->display_mode ?? 'redirect',
                             "iframeWidth" => $this->payplus_payment_gateway_settings->iframe_width ?? '40%',
@@ -1910,6 +1929,70 @@ body{
 <?php
                 $html = ob_get_clean();
                 echo wp_kses_post($html);
+            }
+
+            /**
+             * Conditionally add a "Weight Estimate" fee when Authorization (J5)
+             * mode is active, the admin setting is enabled, and the chosen
+             * payment method belongs to a PayPlus gateway.
+             *
+             * @param WC_Cart $cart
+             * @return void
+             */
+            public function maybe_add_weight_estimate_fee($cart)
+            {
+                if (is_admin() && !wp_doing_ajax()) {
+                    return;
+                }
+
+                $settings = get_option('woocommerce_payplus-payment-gateway_settings', []);
+
+                if (empty($settings['transaction_type']) || $settings['transaction_type'] !== '2') {
+                    return;
+                }
+
+                if (empty($settings['j5_weight_estimate_enabled']) || $settings['j5_weight_estimate_enabled'] !== 'yes') {
+                    return;
+                }
+
+                $chosen = WC()->session ? WC()->session->get('chosen_payment_method', '') : '';
+                if (strpos($chosen, 'payplus-payment-gateway') !== 0) {
+                    return;
+                }
+
+                $percentage = isset($settings['j5_weight_estimate_percentage']) ? intval($settings['j5_weight_estimate_percentage']) : 5;
+
+                $base = floatval($cart->get_subtotal()) - floatval($cart->get_discount_total())
+                      + floatval($cart->get_subtotal_tax()) - floatval($cart->get_discount_tax())
+                      + floatval($cart->get_shipping_total()) + floatval($cart->get_shipping_tax());
+
+                $fee = $base * ($percentage / 100);
+
+                if ($fee > 0) {
+                    $fee_name = !empty($settings['j5_weight_estimate_name'])
+                        ? $settings['j5_weight_estimate_name']
+                        : __('Weight Estimate', 'payplus-payment-gateway');
+                    $cart->add_fee($fee_name, $fee, false);
+                }
+            }
+
+            /**
+             * Append the admin-defined message below the Weight Estimate fee
+             * line in the cart / checkout order review table.
+             */
+            public function weight_estimate_fee_html($cart_totals_fee_html, $fee)
+            {
+                $settings = get_option('woocommerce_payplus-payment-gateway_settings', []);
+                $fee_name = !empty($settings['j5_weight_estimate_name'])
+                    ? $settings['j5_weight_estimate_name']
+                    : __('Weight Estimate', 'payplus-payment-gateway');
+
+                if ($fee->name === $fee_name && !empty($settings['j5_weight_estimate_message'])) {
+                    $message = esc_html($settings['j5_weight_estimate_message']);
+                    $cart_totals_fee_html .= '<br><small style="font-size:0.8em;opacity:0.8;">' . $message . '</small>';
+                }
+
+                return $cart_totals_fee_html;
             }
 
             /**

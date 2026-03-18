@@ -76,41 +76,9 @@ jQuery(function ($) {
     // ──────────────────────────────────────────────────────────────────────────
 
     var _payplusPollDone = false; // shared flag so postMessage can cancel polling
-    var _payplusTvEffectInProgress = false; // flag to prevent multiple redirects during TV effect
+    var _payplusPollTimerId = null;
 
-    // Helper: trigger TV power-down effect before redirect (popup mode only)
-    function redirectWithTvEffect(url) {
-        // Prevent multiple calls
-        if (_payplusTvEffectInProgress) {
-            return;
-        }
-        
-        // Only apply TV effect if:
-        // 1. Feature is enabled (popupTvEffect setting)
-        // 2. Display mode is popupIframe
-        // 3. Alertify popup exists
-        if (
-            payplus_script_checkout.popupTvEffect &&
-            payplus_script_checkout.viewMode === 'popupIframe' &&
-            typeof alertify !== 'undefined' &&
-            jQuery('.alertify').length > 0
-        ) {
-            _payplusTvEffectInProgress = true;
-            _payplusPollDone = true; // Stop polling from redirecting
-            
-            // Add TV closing class to trigger animation on .ajs-dialog
-            jQuery('.alertify').addClass('tv-closing');
-            
-            // Wait for animation to complete (1000ms) then redirect
-            setTimeout(function() {
-                window.location.href = url;
-            }, 1050);
-            
-            // IMPORTANT: Return without redirecting immediately
-            return;
-        }
-        
-        // No TV effect, redirect immediately
+    function payplusRedirect(url) {
         window.location.href = url;
     }
 
@@ -125,7 +93,7 @@ jQuery(function ($) {
             var u = new URL(e.data.url, window.location.origin);
             if (u.origin === window.location.origin) {
                 _payplusPollDone = true;
-                redirectWithTvEffect(e.data.url);
+                payplusRedirect(e.data.url);
             }
         } catch (err) {
             // ignore invalid URL
@@ -136,6 +104,13 @@ jQuery(function ($) {
     function startOrderStatusPoll(result) {
         if (!payplus_script_checkout.enableOrderStatusPoll) return;
         if (!result || !result.order_id || !result.order_received_url) return;
+
+        // Clear any previous poll so we start fresh for this order
+        if (_payplusPollTimerId) {
+            clearInterval(_payplusPollTimerId);
+            _payplusPollTimerId = null;
+        }
+        _payplusPollDone = false;
 
         var redirectUrl = result.order_received_url;
         var orderKey = '';
@@ -171,7 +146,7 @@ jQuery(function ($) {
                         var s = res.data.status;
                         if (s === 'processing' || s === 'completed' || s === 'wc-processing' || s === 'wc-completed') {
                             _payplusPollDone = true;
-                            redirectWithTvEffect(res.data.redirect_url || redirectUrl);
+                            payplusRedirect(res.data.redirect_url || redirectUrl);
                         }
                     }
                 },
@@ -180,13 +155,22 @@ jQuery(function ($) {
 
         // First poll immediately, then every 1.5s
         poll();
-        var pollTimer = setInterval(function() {
+        _payplusPollTimerId = setInterval(function() {
             if (_payplusPollDone) {
-                clearInterval(pollTimer);
+                clearInterval(_payplusPollTimerId);
+                _payplusPollTimerId = null;
                 return;
             }
             poll();
         }, 1500);
+    }
+
+    function stopOrderStatusPoll() {
+        _payplusPollDone = true;
+        if (_payplusPollTimerId) {
+            clearInterval(_payplusPollTimerId);
+            _payplusPollTimerId = null;
+        }
     }
 
     //function to hide other payment methods when subscription order
@@ -278,7 +262,7 @@ jQuery(function ($) {
                         ).hide();
                         const mainPayPlus =
                             "payment_method_payplus-payment-gateway";
-                        $("input#" + mainPayPlus).prop("checked", true);
+                        $("input#" + mainPayPlus).trigger("click");
                     }, 1000);
                 }
             }
@@ -464,6 +448,7 @@ jQuery(function ($) {
                 selectedPaymentMethod !== wc_checkout_form.selectedPaymentMethod
             ) {
                 $(document.body).trigger("payment_method_selected");
+                $(document.body).trigger("update_checkout", { update_shipping_method: false });
             }
 
             wc_checkout_form.selectedPaymentMethod = selectedPaymentMethod;
@@ -1193,9 +1178,9 @@ jQuery(function ($) {
                                         -1 ===
                                         result.redirect.indexOf("http://")
                                     ) {
-                                        redirectWithTvEffect(result.redirect);
+                                        payplusRedirect(result.redirect);
                                     } else {
-                                        redirectWithTvEffect(decodeURI(result.redirect));
+                                        payplusRedirect(decodeURI(result.redirect));
                                     }
                                 } else if ("failure" === result.result) {
                                     throw "Result failure";
@@ -1611,6 +1596,7 @@ jQuery(function ($) {
             $("#pp_iframe").length &&
             ($("#pp_iframe").is(":visible") || force === true)
         ) {
+            stopOrderStatusPoll();
             $("#pp_iframe").fadeOut(() => {
                 $(".payplus-option-description-area").show();
                 $("#place_order").prop("disabled", false);
@@ -1665,6 +1651,7 @@ jQuery(function ($) {
         ppIframe.append(getIframePayment(src, "100%", height));
         $("#closeFrame").on("click", function (e) {
             e.preventDefault();
+            stopOrderStatusPoll();
             ppIframe.style.display = "none";
         });
         $("#place_order").prop("disabled", true);
@@ -1717,6 +1704,9 @@ jQuery(function ($) {
                             this.elements.dialog.style.height =
                                 windowWidth > 568 ? "82%" : "100%";
                             this.elements.content.style.top = "25px";
+                        },
+                        onclose: function () {
+                            stopOrderStatusPoll();
                         },
                     },
                 };

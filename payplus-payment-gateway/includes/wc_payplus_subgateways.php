@@ -596,7 +596,6 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
         add_action('wp_ajax_nopriv_get-hosted-payload', [$this, 'getHostedPayload']);
         add_action('wp_ajax_regenerate-hosted-link', [$this, 'regenerateHostedLink']);
         add_action('wp_ajax_nopriv_regenerate-hosted-link', [$this, 'regenerateHostedLink']);
-        
         // Support tokenization for saved cards
         $this->supports = array_merge($this->supports, ['tokenization']);
     }

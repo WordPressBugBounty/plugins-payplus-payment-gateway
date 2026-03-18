@@ -448,16 +448,23 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
                 $WC_PayPlus_Gateway->payplus_add_log_all('payplus_double_check', 'Hosted Fields Blocks Order ID: ' . $this->orderId . ' | Already checked - Skipping');
             }
 
-            ++$hostedStarted;
-            if ($hostedStarted <= 1) {
-                WC()->session->set('hostedStarted', $hostedStarted);
-                $this->hostedFieldsData($this->orderId, true);
-                $payment_details = $result->payment_details;
-                $payment_details['order_id'] = $this->orderId;
-                $payment_details['secret_key'] = $this->secretKey;
-                $result->set_payment_details($payment_details);
-                $result->set_status('pending');
-            }
+            // Blocks: always run hostedFieldsData on every Place Order attempt.
+            // Each Store API request is a separate HTTP call so there is no
+            // risk of the hook firing twice in the same request.
+            // We do NOT clear hostedPayload here — the cache-match guard
+            // inside hostedFieldsData() compares the full JSON payload
+            // (which includes the order ID in more_info) and will naturally
+            // miss when the order or amounts change.  When the payload IS
+            // identical (e.g. immediate retry with same data), skipping the
+            // Update API call saves ~5 seconds.
+            WC()->session->set('hostedStarted', 1);
+
+            $this->hostedFieldsData($this->orderId, true);
+            $payment_details = $result->payment_details;
+            $payment_details['order_id'] = $this->orderId;
+            $payment_details['secret_key'] = $this->secretKey;
+            $result->set_payment_details($payment_details);
+            $result->set_status('pending');
         } else {
             if (!in_array($context->payment_method, $this->settings['gateways'])) {
                 return;
@@ -673,7 +680,6 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
             'show_hide_submit_button' => $this->name === 'payplus-payment-gateway-hostedfields' ? $this->settings['show_hide_submit_button'] ?? 'no' : 'no',
             'show_order_total' => isset($this->hostedFieldsSettings['show_order_total']) && $this->hostedFieldsSettings['show_order_total'] === 'yes',
             'enableDoubleCheckIfPruidExists' => isset($this->payPlusSettings['enable_double_check_if_pruid_exists']) && $this->payPlusSettings['enable_double_check_if_pruid_exists'] === 'yes' ? true : false,
-            'popupTvEffect' => isset($this->payPlusSettings['popup_tv_effect']) && $this->payPlusSettings['popup_tv_effect'] === 'yes' ? true : false,
             'enableOrderStatusPoll' => !isset($this->payPlusSettings['enable_order_status_poll']) || $this->payPlusSettings['enable_order_status_poll'] !== 'no',
             'viewMode' => $this->displayMode !== 'default' ? $this->displayMode : ($this->payPlusSettings['display_mode'] ?? 'redirect'),
             "{$this->name}-settings" => [
@@ -685,7 +691,9 @@ class WC_Gateway_Payplus_Payment_Block extends AbstractPaymentMethodType
             ],
             'gateways' => $this->settings['gateways'],
             'customIcons' => $this->customIcons,
-            'icon' => ($this->gateway->hide_icon == "no") ? $this->gateway->icon : ''
+            'icon' => ($this->gateway->hide_icon == "no") ? $this->gateway->icon : '',
+            'weightEstimateFeeName' => !empty($this->payPlusSettings['j5_weight_estimate_name']) ? $this->payPlusSettings['j5_weight_estimate_name'] : __('Weight Estimate', 'payplus-payment-gateway'),
+            'weightEstimateFeeMessage' => !empty($this->payPlusSettings['j5_weight_estimate_message']) ? $this->payPlusSettings['j5_weight_estimate_message'] : '',
         ];
     }
 }
