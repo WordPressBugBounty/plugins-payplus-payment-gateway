@@ -897,6 +897,14 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
         }
         
         if ($this->id === "payplus-payment-gateway-hostedfields") {
+            if (WC()->session && WC()->session->get('payplus_hosted_update_failed')) {
+                WC()->session->set('payplus_hosted_update_failed', false);
+                wc_add_notice(__('Payment setup could not be completed. Please refresh the page and try again.', 'payplus-payment-gateway'), 'error');
+                return array(
+                    'result'  => 'failure',
+                    'redirect' => '',
+                );
+            }
             WC()->session->set('order_awaiting_payment', $order_id);
         }
         return array(
@@ -962,16 +970,13 @@ function payplus_filter_checkout_gateways($available_gateways)
                     unset($available_gateways['payplus-payment-gateway']);
                 }
             } else {
-                // Hosted fields is NOT main; only check hide_main_pp_checkout when Hosted Fields is enabled
-                if ($hostedfields_enabled) {
-                    $main_settings = get_option('woocommerce_payplus-payment-gateway_settings', []);
-                    if (isset($main_settings['hide_main_pp_checkout']) && $main_settings['hide_main_pp_checkout'] === 'yes') {
-                        unset($available_gateways['payplus-payment-gateway']);
-                    }
+                $main_settings = get_option('woocommerce_payplus-payment-gateway_settings', []);
+                if (isset($main_settings['hide_main_pp_checkout']) && $main_settings['hide_main_pp_checkout'] === 'yes') {
+                    unset($available_gateways['payplus-payment-gateway']);
                 }
             }
         }
     }
     return $available_gateways;
 }
-add_filter('woocommerce_available_payment_gateways', 'payplus_filter_checkout_gateways', 20); // Use priority 20 to run after default checks
+add_filter('woocommerce_available_payment_gateways', 'payplus_filter_checkout_gateways', 20);

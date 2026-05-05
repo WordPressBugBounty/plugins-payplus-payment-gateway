@@ -20,6 +20,7 @@ class WC_PayPlus_Form_Fields
         $payplus_payment_gateway_settings = get_option('woocommerce_payplus-payment-gateway_settings');
         $payplus_invoice_option = get_option('payplus_invoice_option');
         $showInvoiceRunnerButton = boolval(isset($payplus_invoice_option['show_invoice_runner_button']) && ($payplus_invoice_option['show_invoice_runner_button'] === 'yes' || $payplus_invoice_option['show_invoice_runner_button'] === 'on'));
+        $showPartnersFeatures = boolval(isset($payplus_payment_gateway_settings['enable_partners_features']) && $payplus_payment_gateway_settings['enable_partners_features'] === 'yes');
 
         $admin_bar->add_menu(array(
             'id' => 'PayPlus-toolbar',
@@ -55,6 +56,20 @@ class WC_PayPlus_Form_Fields
                 ),
             ));
         }
+
+        if ($showPartnersFeatures) {
+            $admin_bar->add_menu(array(
+                'id' => 'payPlus-toolbar-product-syncer',
+                'parent' => 'PayPlus-toolbar',
+                'title' => __('Product Syncer', 'payplus-payment-gateway'),
+                'href' => get_admin_url() . "admin.php?page=payplus-product-syncer",
+                'meta' => array(
+                    'title' => __('Product Syncer', 'payplus-payment-gateway'),
+                    'target' => '_blank',
+                    'class' => 'my_menu_item_class',
+                ),
+            ));
+        }
     }
 
     /**
@@ -80,31 +95,32 @@ class WC_PayPlus_Form_Fields
         $showOrdersButton = boolval($isPayPlus && isset($payplus_payment_gateway_settings['payplus_orders_check_button']) && $payplus_payment_gateway_settings['payplus_orders_check_button'] === 'yes');
         $showSubGatewaysOnSide = boolval(isset($payplus_payment_gateway_settings['payplus_show_sub_gateways_side_menu']) && $payplus_payment_gateway_settings['payplus_show_sub_gateways_side_menu'] === 'yes');
         $showInvoiceRunnerButton = boolval(isset($payplus_invoice_option['show_invoice_runner_button']) && ($payplus_invoice_option['show_invoice_runner_button'] === 'yes' || $payplus_invoice_option['show_invoice_runner_button'] === 'on'));
+        $showPartnersFeatures = boolval(isset($payplus_payment_gateway_settings['enable_partners_features']) && $payplus_payment_gateway_settings['enable_partners_features'] === 'yes');
 
         add_menu_page(
             __('PayPlus Gateway', 'payplus-payment-gateway'),
             __('PayPlus Gateway', 'payplus-payment-gateway'),
-            "administrator",
+            'administrator',
             'payplus-payment-gateway',
             ['WC_PayPlus_Form_Fields', 'getGateway'],
             PAYPLUS_PLUGIN_URL_ASSETS_IMAGES . "payplus-icon.svg"
         );
         add_submenu_page(
-            'payplus-payment-gateway', //Page Title
+            'payplus-payment-gateway',
             __('PayPlus Invoice+', 'payplus-payment-gateway'),
             __('PayPlus Invoice+', 'payplus-payment-gateway'),
-            'administrator', //Capability
-            'admin.php?page=wc-settings&tab=checkout&section=payplus-invoice' //Page slug
+            'administrator',
+            'admin.php?page=wc-settings&tab=checkout&section=payplus-invoice'
         );
 
         if ($showInvoiceRunnerButton) {
             add_submenu_page(
-                'payplus-payment-gateway', //Page Title
+                'payplus-payment-gateway',
                 __('Invoice Runner Management', 'payplus-payment-gateway'),
                 __('Invoice Runner Management', 'payplus-payment-gateway'),
-                'administrator', //Capability
-                'payplus-invoice-runner-admin', //Page slug
-                ['WC_PayPlus', 'payplus_invoice_runner_admin_page'] //Callback function
+                'administrator',
+                'payplus-invoice-runner-admin',
+                ['WC_PayPlus', 'payplus_invoice_runner_admin_page']
             );
         }
         if ($showSubGatewaysOnSide) {
@@ -112,53 +128,63 @@ class WC_PayPlus_Form_Fields
                 'payplus-payment-gateway',
                 __('bit', 'payplus-payment-gateway'),
                 __('bit', 'payplus-payment-gateway'),
-                'administrator', //Capability
+                'administrator',
                 'admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway-bit'
             );
             add_submenu_page(
-                'payplus-payment-gateway', //Page Title
+                'payplus-payment-gateway',
                 __('Google Pay', 'payplus-payment-gateway'),
                 __('Google Pay', 'payplus-payment-gateway'),
-                'administrator', //Capability
-                'admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway-googlepay' //Page slug
+                'administrator',
+                'admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway-googlepay'
             );
             add_submenu_page(
-                'payplus-payment-gateway', //Page Title
+                'payplus-payment-gateway',
                 __('Apple Pay', 'payplus-payment-gateway'),
                 __('Apple Pay', 'payplus-payment-gateway'),
-                'administrator', //Capability
-                'admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway-applepay' //Page slug
+                'administrator',
+                'admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway-applepay'
             );
             add_submenu_page(
-                'payplus-payment-gateway', //Page Title
+                'payplus-payment-gateway',
                 __('MULTIPASS', 'payplus-payment-gateway'),
                 __('MULTIPASS', 'payplus-payment-gateway'),
-                'administrator', //Capability
-                'admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway-multipass' //Page slug
+                'administrator',
+                'admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway-multipass'
             );
             add_submenu_page(
-                'payplus-payment-gateway', //Page Title
+                'payplus-payment-gateway',
                 __('PayPal', 'payplus-payment-gateway'),
                 __('PayPal', 'payplus-payment-gateway'),
-                'administrator', //Capability
-                'admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway-paypal' //Page slug
+                'administrator',
+                'admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway-paypal'
             );
             add_submenu_page(
-                'payplus-payment-gateway', //Page Title
+                'payplus-payment-gateway',
                 __('Tav zahav', 'payplus-payment-gateway'),
                 __('Tav Zahav', 'payplus-payment-gateway'),
-                'administrator', //Capability
-                'admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway-tavzahav' //Page slug
+                'administrator',
+                'admin.php?page=wc-settings&tab=checkout&section=payplus-payment-gateway-tavzahav'
             );
         }
         if ($showOrdersButton) {
             add_submenu_page(
-                'payplus-payment-gateway', //Page Title
+                'payplus-payment-gateway',
                 __('Run PayPlus Orders Reports/Validator', 'payplus-payment-gateway'),
                 __('Run PayPlus Orders Reports/Validator', 'payplus-payment-gateway'),
-                'administrator', //Capability
-                'runPayPlusOrdersChecker', //Page slug
+                'administrator',
+                'runPayPlusOrdersChecker',
                 [__CLASS__, 'runPayPlusOrdersChecker']
+            );
+        }
+        if ($showPartnersFeatures) {
+            add_submenu_page(
+                'payplus-payment-gateway',
+                __('Product Syncer', 'payplus-payment-gateway'),
+                __('Product Syncer', 'payplus-payment-gateway'),
+                'administrator',
+                'payplus-product-syncer',
+                ['WC_PayPlus_Product_Syncer', 'render_product_syncer_page']
             );
         }
     }
@@ -1135,6 +1161,13 @@ Orders that were successful and cancelled manually will not be tested or updated
                 'type'    => 'checkbox',
                 'default' => 'no',
             ],
+            'enable_partners_features' => [
+                'title'   => __('Enable Partners Features', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+                'description' => __('Enable additional features for PayPlus partners, including product syncing.', 'payplus-payment-gateway'),
+                'type'    => 'checkbox',
+                'default' => 'no',
+            ],
             'disable_woocommerce_scheduler' => [
                 'title' => __('Disable woocommerce scheduler', 'payplus-payment-gateway'),
                 'type' => 'checkbox',
@@ -1146,6 +1179,14 @@ Orders that were successful and cancelled manually will not be tested or updated
                 'label' => __('Log debug messages', 'payplus-payment-gateway'),
                 'default' => 'yes',
                 'custom_attributes' => array('disabled' => 'disabled'),
+            ],
+            'pos_only_mode' => [
+                'title' => __('POS Only Mode', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'label' => __('Enable POS Only Mode (EMV devices only)', 'payplus-payment-gateway'),
+                'default' => 'no',
+                'desc_tip' => true,
+                'description' => __('When enabled, PayPlus will only provide EMV POS device functionality. All checkout page hooks, payment page redirects, hosted fields, express checkout, and other frontend features will be disabled so they do not interfere with other payment gateways (e.g. Tranzilla). Requires a page refresh / save to take effect.', 'payplus-payment-gateway'),
             ],
             'pos_override' => [
                 'title' => __('POS Override', 'payplus-payment-gateway'),
@@ -1161,6 +1202,35 @@ Orders that were successful and cancelled manually will not be tested or updated
                 'default' => '',
                 'desc_tip' => true,
                 'description' => __('POS Override Gateways - divide by commas - the payment gateways that will be overridden by the PayPlus EMV POS device.', 'payplus-payment-gateway'),
+            ],
+            'cancellation_fee_title' => [
+                'title' => __('Cancellation Fee (Consumer Protection Law)', 'payplus-payment-gateway'),
+                'type' => 'title',
+                'description' => __('Automatically deduct a cancellation fee from refunds per Israeli Consumer Protection regulations (5% or 100 NIS, whichever is lower).', 'payplus-payment-gateway'),
+            ],
+            'enable_cancellation_fee' => [
+                'title' => __('Enable Cancellation Fee', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'label' => __('Deduct cancellation fee from refunds', 'payplus-payment-gateway'),
+                'default' => 'no',
+                'description' => __('When enabled, a cancellation fee will be deducted from every refund per Israeli Consumer Protection regulations.', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+            ],
+            'cancellation_fee_percent' => [
+                'title' => __('Cancellation Fee Percentage', 'payplus-payment-gateway'),
+                'type' => 'number',
+                'default' => '5',
+                'description' => __('Percentage of the refund amount (default: 5%)', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+                'custom_attributes' => ['min' => '0', 'max' => '100', 'step' => '0.1'],
+            ],
+            'cancellation_fee_max' => [
+                'title' => __('Maximum Cancellation Fee', 'payplus-payment-gateway'),
+                'type' => 'number',
+                'default' => '100',
+                'description' => __('Maximum fee amount in the order currency (default: 100)', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+                'custom_attributes' => ['min' => '0', 'step' => '0.01'],
             ],
         ];
         return $formFields;

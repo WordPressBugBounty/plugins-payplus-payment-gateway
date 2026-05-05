@@ -18,6 +18,8 @@ define('PAYPLUS_LOG_INFO_LEVEL', 'info');
 class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 {
 
+    private static $page_protect_registered = false;
+
     public $id = 'payplus-payment-gateway';
     public $add_product_field_transaction_type;
     public $disable_menu_side;
@@ -296,8 +298,11 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
         /****** FILTER START ******/
 
-        add_filter('user_has_cap', [$this, 'payplus_disbale_page_delete'], 10, 3);
-        add_filter('page_row_actions', [$this, 'payplus_remove_row_actions_post'], 10, 1);
+        if (is_admin() && !self::$page_protect_registered) {
+            self::$page_protect_registered = true;
+            add_filter('user_has_cap', [$this, 'payplus_disbale_page_delete'], 10, 3);
+            add_filter('page_row_actions', [$this, 'payplus_remove_row_actions_post'], 10, 1);
+        }
 
         /****** FILTER END ******/
 
@@ -477,6 +482,14 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 }
             });
             return $this->id === 'payplus-payment-gateway';
+        }
+
+        if ($this->id === 'payplus-payment-gateway'
+            && isset($this->settings['hide_main_pp_checkout'])
+            && $this->settings['hide_main_pp_checkout'] === 'yes'
+            && !is_admin()
+        ) {
+            return false;
         }
 
         // Default availability check
@@ -977,9 +990,12 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
      */
     public function payplus_disbale_page_delete($allcaps, $caps, $args)
     {
-        $post_id = get_option('error_page_payplus');
-        if (isset($args[0]) && isset($args[2]) && $args[2] == $post_id && ($args[0] == 'delete_post' || $args[0] == 'edit_pages')) {
+        static $post_id = null;
+        if ($post_id === null) {
+            $post_id = get_option('error_page_payplus');
+        }
 
+        if ($post_id && isset($args[0]) && isset($args[2]) && $args[2] == $post_id && ($args[0] == 'delete_post' || $args[0] == 'edit_pages')) {
             $allcaps[$caps[0]] = false;
         }
         return $allcaps;
@@ -1366,13 +1382,31 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                         'payplus_total_refunded_amount' => round($refunded_amount + $amount, 2),
                     );
                     WC_PayPlus_Meta_Data::update_meta($order, $insertMeta);
+
+                    // phpcs:disable WordPress.Security.NonceVerification.Missing -- Nonce verified by WooCommerce before calling process_refund
+                    $cancellationFeeNote = '';
+                    if (isset($_POST['payplus_cancellation_fee']) && floatval($_POST['payplus_cancellation_fee']) > 0) {
+                        $cancellationFee = round(floatval(sanitize_text_field(wp_unslash($_POST['payplus_cancellation_fee']))), 2);
+                        $originalRefundAmount = isset($_POST['payplus_original_refund_amount'])
+                            ? round(floatval(sanitize_text_field(wp_unslash($_POST['payplus_original_refund_amount']))), 2)
+                            : $amount;
+                        $cancellationFeeNote = sprintf(
+                            /* translators: %1$s: cancellation fee amount, %2$s: currency code, %3$s: original refund amount */
+                            '<br />' . __('Cancellation Fee Applied: %1$s %2$s (Original refund request: %3$s %2$s)', 'payplus-payment-gateway'),
+                            $cancellationFee,
+                            $order->get_currency(),
+                            $originalRefundAmount
+                        );
+                    }
+                    // phpcs:enable WordPress.Security.NonceVerification.Missing
+
                     $order->add_order_note(sprintf(
                         'PayPlus Refund is Successful<br />Refund Transaction Number: %1$s<br />Amount: %2$s %3$s<br />Reason: %4$s',
                         $res->data->transaction->number,
                         $res->data->transaction->amount,
                         $order->get_currency(),
                         $reason
-                    ));
+                    ) . $cancellationFeeNote);
                     $this->payplus_add_log_all($handle, wp_json_encode($res), 'completed');
                     $flag = true;
                 } else {
@@ -2237,6 +2271,9 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $items = $order->get_items(['line_item', 'fee', 'coupon']);
         if (count($items)) {
             foreach ($items as $item => $item_data) {
+                if ($item_data->get_type() === 'coupon') {
+                    continue;
+                }
                 $transactionTypeValue = get_post_meta($item_data['product_id'], 'payplus_transaction_type', true);
                 if ($transactionTypeValue == $checkChargemMethod) {
                     return true;
@@ -2452,6 +2489,12 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         }
 
         foreach ($items as $item => $item_data) {
+            if ($item_data->get_type() === 'coupon') {
+                $couponName = str_replace(["'", '"', "\n", "\\", '”'], '', wp_strip_all_tags($item_data->get_name()));
+                $allProductSku .= (empty($allProductSku)) ? " ( " . $couponName : ' , ' . $couponName;
+                continue;
+            }
+
             $discount = 0;
             $tempTaxValue = 0;
             $product = new WC_Product($item_data['product_id']);
@@ -2466,9 +2509,6 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             ));
             $quantity = ($item_data['quantity'] ? round($item_data['quantity'], $this->rounding_decimals) : '1');
 
-            if ($item_data['type'] == "coupon") {
-                $allProductSku .= (empty($allProductSku)) ? " ( " . $name : ' , ' . $name;
-            } else {
                 if ($item_data['type'] == "fee") {
                     $productPrice = $item_data['line_total'];
                     if ($this->rounding_decimals != 0 && $wc_tax_enabled) {
@@ -2550,7 +2590,6 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 if ($productPrice) {
                     $productsItems[] = ($json) ? wp_json_encode($itemDetails, JSON_UNESCAPED_UNICODE) : $itemDetails;
                 }
-            }
         }
 
         if ($this->rounding_decimals == 0 && $order->get_total_tax()) {
@@ -4287,8 +4326,47 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $payplus_status_active = WC_PayPlus_Meta_Data::get_meta($order->get_id(), 'payplus_status_active', true);
 
             if (empty($payplus_status_active)) {
-                $token = get_user_meta($order->user_id, 'cc_token', true);
-                $this->payplus_add_log_all($handle, 'Subscription Started. Order ID:( ' . $order->get_id() . ' )- Token: ' . $token);
+                $token = '';
+                $token_source = '';
+
+                $subscription_id = WC_PayPlus_Meta_Data::get_meta($order->get_id(), '_subscription_renewal', true);
+                $cc_token_user_meta = get_user_meta($order->get_user_id(), 'cc_token', true);
+                $this->payplus_add_log_all($handle, 'Token resolution for renewal order #' . $order->get_id() . ' | subscription_id: ' . ($subscription_id ?: 'none') . ' | user cc_token: ' . ($cc_token_user_meta ?: 'empty'));
+
+                if ($subscription_id) {
+                    $token = WC_PayPlus_Meta_Data::get_meta($subscription_id, 'payplus_token_uid', true);
+                    if ($token) {
+                        $token_source = 'subscription #' . $subscription_id;
+                        $this->payplus_add_log_all($handle, 'Token found on subscription #' . $subscription_id . ': ' . $token);
+                    }
+
+                    if (empty($token)) {
+                        $this->payplus_add_log_all($handle, 'No token on subscription #' . $subscription_id . ', checking parent order');
+                        $subscription_post = $this->payplus_get_posts_id($subscription_id);
+                        if ($subscription_post && $subscription_post[0]->post_parent) {
+                            $parent_order_id = $subscription_post[0]->post_parent;
+                            $token = WC_PayPlus_Meta_Data::get_meta($parent_order_id, 'payplus_token_uid', true);
+                            if ($token) {
+                                $token_source = 'parent order #' . $parent_order_id;
+                                $this->payplus_add_log_all($handle, 'Token found on parent order #' . $parent_order_id . ': ' . $token);
+                            } else {
+                                $this->payplus_add_log_all($handle, 'No token on parent order #' . $parent_order_id . ' either', 'warning');
+                            }
+                        }
+                    }
+
+                    if (!empty($token) && $token !== $cc_token_user_meta) {
+                        $this->payplus_add_log_all($handle, 'TOKEN MISMATCH PREVENTED: order/subscription token (' . $token . ') differs from user cc_token (' . ($cc_token_user_meta ?: 'empty') . ') - using order token', 'warning');
+                    }
+                }
+
+                if (empty($token)) {
+                    $token = $cc_token_user_meta;
+                    $token_source = 'user meta (cc_token) fallback';
+                    $this->payplus_add_log_all($handle, 'Falling back to user meta cc_token: ' . ($token ?: 'empty'), 'warning');
+                }
+
+                $this->payplus_add_log_all($handle, 'Subscription Started. Order ID:( ' . $order->get_id() . ' ) - Token: ' . $token . ' - Source: ' . $token_source);
 
                 $result = $this->receipt_page($order->get_id(), $token, true, 'WP_SUB_' . $order->get_id(), $amount_to_charge, false, $move_token);
 
