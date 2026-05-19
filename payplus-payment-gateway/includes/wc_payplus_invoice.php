@@ -446,11 +446,23 @@ class PayplusInvoice
         }
 
         if (!count($resultApps)) {
-            $method_payment = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_method', true) == "" ? 'other' : WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_method', true);
-            if ($method_payment == 'credit-card') {
+            $method_payment = strtolower(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_method', true));
+            $alt_method = strtolower(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_alternative_method_name', true));
+
+            if (!empty($alt_method) && in_array($alt_method, $this->payment_method, true)) {
+                $method_payment = $alt_method;
+            } elseif (empty($method_payment)) {
+                $method_payment = 'other';
+            }
+
+            if ($method_payment === 'credit-card') {
                 $paymentArray['method_payment'] = 'credit-card';
                 $paymentArray['four_digits'] = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_four_digits', true);
                 $paymentArray['brand_name'] = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_brand_name', true);
+                $paymentArray['price'] = ($dual * $sum) * 100;
+                $resultApps[] = (object) $paymentArray;
+            } elseif (in_array($method_payment, $this->payment_method, true) && $method_payment !== 'credit-card') {
+                $paymentArray['method_payment'] = $method_payment;
                 $paymentArray['price'] = ($dual * $sum) * 100;
                 $resultApps[] = (object) $paymentArray;
             } else {
@@ -1030,7 +1042,18 @@ class PayplusInvoice
                 $resultApps = $wpdb->get_results($wpdb->prepare("SELECT * FROM {$wpdb->prefix}payplus_order WHERE order_id = %d AND delete_at = 0", $order_id), OBJECT);
             }
         } else {
-            $sql = $wpdb->prepare("SELECT * FROM {$wpdb->prefix}postmeta WHERE post_id = %d AND (", $order_id);
+            $isHPOS = WC_PayPlus_Meta_Data::isHPOS();
+
+            if ($isHPOS) {
+                $meta_table = $wpdb->prefix . 'wc_orders_meta';
+                $id_column  = 'order_id';
+            } else {
+                $meta_table = $wpdb->prefix . 'postmeta';
+                $id_column  = 'post_id';
+            }
+
+            // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- table/column names are not user input
+            $sql = $wpdb->prepare("SELECT * FROM {$meta_table} WHERE {$id_column} = %d AND (", $order_id);
             $clauses = [];
 
             foreach ($this->payment_method as $key => $value) {
@@ -1125,6 +1148,21 @@ class PayplusInvoice
         $invoice_manual = $this->payplus_get_create_invoice_manual();
 
         $order = wc_get_order($order_id);
+
+        if (isset($this->payplus_invoice_option['do-not-create']) && is_array($this->payplus_invoice_option['do-not-create'])) {
+            $doNotCreate = $this->payplus_invoice_option['do-not-create'];
+            $typePaymentMethodEarly = $order->get_payment_method();
+
+            // POS EMV orders store payment_method as 'payplus-payment-gateway'
+            // but can be identified by the payplus_response_emv meta
+            $isEmvOrder = !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response_emv'));
+            $effectiveMethod = $isEmvOrder ? 'payplus-payment-gateway-pos-emv' : $typePaymentMethodEarly;
+
+            if (in_array($effectiveMethod, $doNotCreate, true)) {
+                $order->add_order_note('This payment method is set as: Not to create documents automatically');
+                return;
+            }
+        }
 
         if (isset($this->payplus_invoice_option['zero_total_dont_create']) && $this->payplus_invoice_option['zero_total_dont_create'] == "yes") {
             if (floatval($order->get_total()) === 0.0) {
@@ -1288,12 +1326,25 @@ class PayplusInvoice
                     $payload['send_document_sms'] = $this->payplus_invoice_send_document_sms;
 
                     if (!count($resultApps)) {
-                        $method_payment = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_method', true) == "" ? 'other' : WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_method', true);
-                        if ($method_payment == 'credit-card') {
+                        $method_payment = strtolower(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_method', true));
+                        $alt_method = strtolower(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_alternative_method_name', true));
+
+                        // alternative_method_name takes priority (bit, google-pay, apple-pay, etc.)
+                        if (!empty($alt_method) && in_array($alt_method, $this->payment_method, true)) {
+                            $method_payment = $alt_method;
+                        } elseif (empty($method_payment)) {
+                            $method_payment = 'other';
+                        }
+
+                        if ($method_payment === 'credit-card') {
                             $paymentArray['method_payment'] = 'credit-card';
                             $paymentArray['four_digits'] = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_four_digits', true);
                             $paymentArray['brand_name'] = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_brand_name', true);
                             $paymentArray['number_of_payments'] = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_number_of_payments', true);
+                            $paymentArray['price'] = ($dual * $totalCartAmount) * 100;
+                            $resultApps[] = (object) $paymentArray;
+                        } elseif (in_array($method_payment, $this->payment_method, true) && $method_payment !== 'credit-card') {
+                            $paymentArray['method_payment'] = $method_payment;
                             $paymentArray['price'] = ($dual * $totalCartAmount) * 100;
                             $resultApps[] = (object) $paymentArray;
                         } else {

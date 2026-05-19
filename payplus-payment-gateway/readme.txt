@@ -4,7 +4,7 @@ Tags: Woocommerce Payment Gateway, Credit Cards, Charges and Refunds, Subscripti
 Requires at least: 6.2
 Tested up to: 6.9
 Requires PHP: 7.4
-Stable tag: 8.1.7
+Stable tag: 8.1.8
 PlugIn URL: https://www.payplus.co.il/wordpress
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
@@ -85,6 +85,14 @@ If you get stuck, you can ask for help in the Plugin Forum. or contact us direct
 8. Save your settings, now you have an active payment page!
 
 == Changelog ==
+
+== 8.1.8  - 19-05-2026 =
+
+- Feature   - Invoice+ Documents: Added POS EMV to the "Do not create documents" exclusion list.
+- Fix       - Invoice+ Documents: POS EMV exclusion now works correctly (POS EMV orders are detected via transaction meta).
+- Fix       - Invoice+ Documents: Payment method detection now uses alternative_method_name (bit, apple-pay, google-pay) when available.
+- Fix       - Invoice+ Documents: Payment query is now HPOS-compatible (queries correct meta table on High-Performance Order Storage sites) - Fix for docs that came out as other instead of payment app.
+- Fix       - Payment meta is now fully stored before order save, preventing race conditions with automatic invoice creation hooks.
 
 == 8.1.7  - 05-05-2026 =
 
