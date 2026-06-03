@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.1.8
+ * Version: 8.1.9
  * Tested up to: 6.9
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.1.8');
-define('PAYPLUS_VERSION_DB', 'payplus_8_1_8');
+define('PAYPLUS_VERSION', '8.1.9');
+define('PAYPLUS_VERSION_DB', 'payplus_8_1_9');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -1450,10 +1450,13 @@ body{
     {
         global $wp;
         $error_page_payplus = get_option('error_page_payplus');
+        if (empty($error_page_payplus)) {
+            return;
+        }
         $postIdcurrenttUrl = url_to_postid(home_url($wp->request));
-        if (intval($postIdcurrenttUrl) === intval($error_page_payplus)) {
+        if ($postIdcurrenttUrl > 0 && intval($postIdcurrenttUrl) === intval($error_page_payplus)) {
         ?>
-            <meta name=" robots" content="noindex,nofollow">
+            <meta name="robots" content="noindex,nofollow">
         <?php
         }
     }
