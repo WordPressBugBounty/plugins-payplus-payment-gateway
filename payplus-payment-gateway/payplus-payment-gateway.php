@@ -4,8 +4,8 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.1.9
- * Tested up to: 6.9
+ * Version: 8.2.0
+ * Tested up to: 7.0
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
  * Requires PHP: 7.4
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.1.9');
-define('PAYPLUS_VERSION_DB', 'payplus_8_1_9');
+define('PAYPLUS_VERSION', '8.2.0');
+define('PAYPLUS_VERSION_DB', 'payplus_8_2_0');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -901,7 +901,7 @@ class WC_PayPlus
     public function getPayplusCron()
     {
         $now = time();
-        $min_age_minutes = 30;
+        $min_age_minutes = 10;
         $max_age_hours = 2;
 
         $date_start = gmdate('Y-m-d H:i:s', $now - ($max_age_hours * HOUR_IN_SECONDS));
@@ -953,6 +953,13 @@ class WC_PayPlus
             $created_at_local = wp_date('H:i', $order_created_ts);
             $runIpn = true;
             if ($age_minutes >= $min_age_minutes) {
+                // Skip orders that were manually cancelled by an admin (flagged via checkbox setting)
+                $admin_cancelled = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_admin_cancelled', true);
+                if (!empty($admin_cancelled)) {
+                    $this->payplus_gateway->payplus_add_log_all('payplus-cron-log', "$order_id: Skipping - manually cancelled by admin (payplus_admin_cancelled flag set).\n");
+                    continue;
+                }
+
                 $pruid_history = WC_PayPlus_Meta_Data::get_pruid_history($order_id);
                 $paymentPageUid = !empty($pruid_history);
                 $payPlusCronTested = !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_cron_tested')) ? WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_cron_tested') : 0;
