@@ -4,7 +4,7 @@ Tags: Woocommerce Payment Gateway, Credit Cards, Charges and Refunds, Subscripti
 Requires at least: 6.2
 Tested up to: 7.0
 Requires PHP: 7.4
-Stable tag: 8.2.2
+Stable tag: 8.2.3
 PlugIn URL: https://www.payplus.co.il/wordpress
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
@@ -86,9 +86,16 @@ If you get stuck, you can ask for help in the Plugin Forum. or contact us direct
 
 == Changelog ==
 
+== 8.2.3  - 08-07-2026 =
+
+- Feature   - New "Show loader during iframe payment & redirect" option: displays a processing spinner over the iframe when payment is submitted, then a full-screen redirect loader when order completes.
+- Fix       - Classic checkout: reopening an iframe popup/same-page payment after closing without paying no longer falls back to redirect mode (duplicate payment page fix now correctly returns the cached link for inline modes).
+- Fix       - Blocks checkout: processing loader, if activated, no longer appears immediately when the iframe opens; it now correctly waits for the user's payment submission.
+- Fix       - Cron: payment_complete() now fires while the order is still pending (matching regular callback behavior), ensuring the "Payment complete" order note is recorded.
+
 == 8.2.2  - 24-06-2026 =
 
-- Security  - Hosted payment and order completion AJAX handlers now verify order ownership before acting. Prevents unauthenticated metadata tampering and order-key disclosure.
+- Security  - Hosted payment and order completion AJAX handlers now verify order ownership before acting. Prevents unauthenticated metadata tampering and order-key disclosure. (Reported by Pedro Pinho and kevin @OPCIA via WPScan/Automattic)
 - Fix       - Checkout: "Place Order" button no longer flickers when switching payment methods.
 - Fix       - Cron: when "Payment Completed" is enabled, cron-recovered orders now correctly fire the woocommerce_payment_complete hook.
 

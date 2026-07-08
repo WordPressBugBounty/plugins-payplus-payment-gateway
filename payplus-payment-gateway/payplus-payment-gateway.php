@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.2.2
+ * Version: 8.2.3
  * Tested up to: 7.0
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.2.2');
-define('PAYPLUS_VERSION_DB', 'payplus_8_2_2');
+define('PAYPLUS_VERSION', '8.2.3');
+define('PAYPLUS_VERSION_DB', 'payplus_8_2_3');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -1037,10 +1037,6 @@ class WC_PayPlus
                             $refreshed_order = wc_get_order($order_id);
                             $new_status = $refreshed_order ? $refreshed_order->get_status() : $status;
                             if ($new_status !== $status) {
-                                if ($this->payplus_gateway->fire_completed && in_array($new_status, ['processing', 'completed', 'wc-processing', 'wc-completed'], true)) {
-                                    $refreshed_order->payment_complete();
-                                    $this->payplus_gateway->payplus_add_log_all('payplus-cron-log', "$order_id: Cron fired payment_complete() (fire_completed setting enabled).\n");
-                                }
                                 $this->payplus_gateway->payplus_add_log_all('payplus-cron-log', "$order_id: Status changed to $new_status after PRUID $uid — stopping iteration.\n");
                                 break;
                             }
@@ -1895,6 +1891,9 @@ body{
                             "isSubscriptionOrder" => $isSubscriptionOrder,
                             "iframeAutoHeight" => $this->iframeAutoHeight,
                             "enableOrderStatusPoll" => !property_exists($this->payplus_payment_gateway_settings, 'enable_order_status_poll') || $this->payplus_payment_gateway_settings->enable_order_status_poll !== 'no',
+                            "showIframeRedirectLoader" => property_exists($this->payplus_payment_gateway_settings, 'show_iframe_redirect_loader') && $this->payplus_payment_gateway_settings->show_iframe_redirect_loader === 'yes',
+                            "redirectingText" => __('Redirecting… Please wait — do not close this page', 'payplus-payment-gateway'),
+                            "processingPaymentText" => __('Processing payment…', 'payplus-payment-gateway'),
                             "viewMode" => $this->payplus_payment_gateway_settings->display_mode ?? 'redirect',
                             "iframeWidth" => $this->payplus_payment_gateway_settings->iframe_width ?? '40%',
                             "hasSavedTokens" => WC_Payment_Tokens::get_customer_tokens(get_current_user_id()),
