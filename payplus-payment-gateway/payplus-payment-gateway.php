@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.2.3
+ * Version: 8.2.4
  * Tested up to: 7.0
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.2.3');
-define('PAYPLUS_VERSION_DB', 'payplus_8_2_3');
+define('PAYPLUS_VERSION', '8.2.4');
+define('PAYPLUS_VERSION_DB', 'payplus_8_2_4');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -82,7 +82,7 @@ class WC_PayPlus
         add_action('admin_notices', [$this, 'admin_notices'], 15);
         add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_scripts']);
         add_action('init', [$this, 'load_textdomain'], 10);
-        add_action('plugins_loaded', [$this, 'init']);
+        add_action('plugins_loaded', [$this, 'init'], 20);
         add_action('woocommerce_api_payplus_gateway', [$this, 'ipn_response']);
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), [$this, 'plugin_action_links']);
         add_filter('cron_schedules', [$this, 'payplus_add_custom_cron_schedule']);
@@ -96,6 +96,14 @@ class WC_PayPlus
             add_action('wp_head', [$this, 'payplus_no_index_page_error']);
             add_action('wp_ajax_make-hosted-payment', [$this, 'hostedPayment']);
             add_action('wp_ajax_nopriv_make-hosted-payment', [$this, 'hostedPayment']);
+
+            // Hosted Fields AJAX — registered once at plugin level (not in gateway __construct).
+            add_action('wp_ajax_complete_order', [$this, 'ajax_hosted_fields_complete_order']);
+            add_action('wp_ajax_nopriv_complete_order', [$this, 'ajax_hosted_fields_complete_order']);
+            add_action('wp_ajax_get-hosted-payload', [$this, 'ajax_hosted_fields_get_payload']);
+            add_action('wp_ajax_nopriv_get-hosted-payload', [$this, 'ajax_hosted_fields_get_payload']);
+            add_action('wp_ajax_regenerate-hosted-link', [$this, 'ajax_hosted_fields_regenerate_link']);
+            add_action('wp_ajax_nopriv_regenerate-hosted-link', [$this, 'ajax_hosted_fields_regenerate_link']);
 
             add_action('wp_ajax_payplus_check_order_redirect', [$this, 'ajax_payplus_check_order_redirect']);
             add_action('wp_ajax_nopriv_payplus_check_order_redirect', [$this, 'ajax_payplus_check_order_redirect']);
@@ -517,6 +525,56 @@ class WC_PayPlus
             </p>
         </div>
     <?php
+    }
+
+    /**
+     * Resolve the WC-managed Hosted Fields gateway instance (creates registry if needed).
+     *
+     * @return WC_PayPlus_Gateway_HostedFields|null
+     */
+    public function get_hosted_fields_gateway()
+    {
+        if (!function_exists('WC') || !WC()->payment_gateways) {
+            return null;
+        }
+        $gateways = WC()->payment_gateways->payment_gateways();
+        if (
+            isset($gateways['payplus-payment-gateway-hostedfields'])
+            && $gateways['payplus-payment-gateway-hostedfields'] instanceof WC_PayPlus_Gateway_HostedFields
+        ) {
+            return $gateways['payplus-payment-gateway-hostedfields'];
+        }
+        return null;
+    }
+
+    public function ajax_hosted_fields_complete_order()
+    {
+        $gateway = $this->get_hosted_fields_gateway();
+        if (!$gateway) {
+            wp_send_json_error(['message' => 'Hosted Fields gateway unavailable'], 400);
+            return;
+        }
+        $gateway->complete_order_via_ajax();
+    }
+
+    public function ajax_hosted_fields_get_payload()
+    {
+        $gateway = $this->get_hosted_fields_gateway();
+        if (!$gateway) {
+            wp_send_json_error(['message' => 'Hosted Fields gateway unavailable'], 400);
+            return;
+        }
+        $gateway->getHostedPayload();
+    }
+
+    public function ajax_hosted_fields_regenerate_link()
+    {
+        $gateway = $this->get_hosted_fields_gateway();
+        if (!$gateway) {
+            wp_send_json_error(['message' => 'Hosted Fields gateway unavailable'], 400);
+            return;
+        }
+        $gateway->regenerateHostedLink();
     }
 
     public function hostedPayment()
@@ -1731,8 +1789,16 @@ body{
             public function init()
             {
                 $isPayPlusEnabled = isset($this->payplus_payment_gateway_settings->enabled) && $this->payplus_payment_gateway_settings->enabled === 'yes';
-                if (class_exists("WooCommerce")) {
-                    $this->_wpnonce = wp_create_nonce('_wp_payplusIpn');
+                if (!class_exists("WooCommerce")) {
+                    add_action('before_woocommerce_init', [$this, 'init']);
+                    return;
+                }
+                if (did_action('payplus_gateway_initialized')) {
+                    return;
+                }
+                do_action('payplus_gateway_initialized');
+
+                $this->_wpnonce = wp_create_nonce('_wp_payplusIpn');
                     require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-statics.php';
                     require_once PAYPLUS_PLUGIN_DIR . '/includes/admin/class-wc-payplus-admin-settings.php';
                     require_once PAYPLUS_PLUGIN_DIR . '/includes/wc_payplus_gateway.php';
@@ -1775,7 +1841,11 @@ body{
                         new WC_PayPlus_Embedded();
                     }
 
-                    add_action('woocommerce_blocks_loaded', [$this, 'woocommerce_payplus_woocommerce_block_support']);
+                    if (did_action('woocommerce_blocks_loaded')) {
+                        $this->woocommerce_payplus_woocommerce_block_support();
+                    } else {
+                        add_action('woocommerce_blocks_loaded', [$this, 'woocommerce_payplus_woocommerce_block_support']);
+                    }
                     add_action('init', [$this, 'register_customer_invoice_name_blocks_field'], 20);
                     add_action('init', [$this, 'register_customer_other_id_blocks_field'], 20);
                     // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core WordPress filter
@@ -1828,7 +1898,6 @@ body{
                     if ($this->isApplePayGateWayEnabled || $this->isApplePayExpressEnabled) {
                         payplus_add_file_ApplePay();
                     }
-                }
             }
 
             public function isHostedInitiated()
@@ -1907,6 +1976,12 @@ body{
                             "enableDoubleCheckIfPruidExists" => isset($this->payplus_gateway) && $this->payplus_gateway->enableDoubleCheckIfPruidExists ? true : false,
                             "hostedPayload" => WC()->session ? WC()->session->get('hostedPayload') : null,
                             "showOrderTotal" => isset($this->hostedFieldsOptions['show_order_total']) && $this->hostedFieldsOptions['show_order_total'] === 'yes',
+                            "j5WeightEstimateEnabled" => (
+                                isset($this->payplus_payment_gateway_settings->transaction_type)
+                                && $this->payplus_payment_gateway_settings->transaction_type === '2'
+                                && isset($this->payplus_payment_gateway_settings->j5_weight_estimate_enabled)
+                                && $this->payplus_payment_gateway_settings->j5_weight_estimate_enabled === 'yes'
+                            ),
                         ]
                     );
                     if (!is_cart() && !is_product() && !is_shop()) {
