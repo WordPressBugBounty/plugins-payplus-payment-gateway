@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [8.2.5]  - 09-14-2026 - (Chihiro)
+
+- Fix       - Hosted Fields (PayPlus Embedded): checkout no longer binds to a generic customer or the wrong order id; payload and completion use the real WooCommerce order.
+- Fix       - Invoice+: Multipass (and other club/alternative methods) no longer print as "Other" on documents — the actual method name is stored and used.
+- Fix       - Invoice+: overlapping callback and redirect no longer create a second document (`unique-identifier-exists`) or a duplicate invoice payload.
+- Fix       - PayPlus order fields are written once when callback and the success URL finish the same payment (HPOS no longer stacks the same custom field twice).
+- Tweak     - Optional "Prevent duplicate payment complete" setting (default off). When enabled, overlapping redirect/callback/IPN success paths cannot fire payment_complete() twice.
+- Fix       - Express Checkout Google Pay is off by default and stays off unless Active page UID Google Pay is set (approval). Prevents the Google Pay iframe from loading on checkout without a valid UID.
+- Tweak     - WordPress "Tested up to" set to 7.1.
+- Feature   - Apple Pay: optional "Hide Apple Pay as a standalone checkout option" — keeps Apple Pay enabled for the main PayPlus payment page, but removes it as its own method on Classic and Blocks checkout.
+- Feature   - Partners Dev Mode: optional "Block unpaid $0 orders from session desync" (default off; appears under Enable partners dev mode). Stops checkout when products are present but the total dropped to 0 without a real 100% coupon or gift card (WooCommerce session glitch / Instagram and similar apps). Classic $0 coupon orders are treated as legitimate (discount is often stored ex-tax).
+- Fix       - Classic $0 / PW Gift Card checkouts empty the cart on thank-you (WooCommerce `wc_empty_cart()` leaves the logged-in persistent cart; gift cards can also skip WooCommerce's hash check).
+
 ## [8.2.4]  - 08-10-2026 - (Soda)
 
 - Feature   - New "Open payment page in website language" option under Payment Page Options. When enabled, `language_code` is sent from the storefront language (Polylang / WPML / locale). When disabled, behavior is unchanged (`get_locale()`).

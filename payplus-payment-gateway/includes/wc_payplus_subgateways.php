@@ -241,6 +241,16 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
                 'default' => '3'
             ]
         ];
+        if ($this->id === 'payplus-payment-gateway-applepay') {
+            $this->form_fields['hide_apple_pay_checkout'] = [
+                'title' => __('Hide Apple Pay as a standalone checkout option', 'payplus-payment-gateway'),
+                'type' => 'checkbox',
+                'label' => __('Hide Apple Pay as a standalone checkout option (Default: Unchecked)', 'payplus-payment-gateway'),
+                'description' => __('Keeps Apple Pay enabled so it can appear on the main PayPlus payment page, but does not show Apple Pay as its own method in Classic or Blocks checkout.', 'payplus-payment-gateway'),
+                'desc_tip' => true,
+                'default' => 'no',
+            ];
+        }
         if ($this->id === 'payplus-payment-gateway-googlepay' || $this->id === 'payplus-payment-gateway-applepay' || $this->id === 'payplus-payment-gateway-bit') {
             $this->form_fields['hide_payments_field'] = [
                 'title' => __('Hide Number Of Payments In Payment Page', 'payplus-payment-gateway'),
@@ -374,6 +384,10 @@ abstract class WC_PayPlus_Subgateway extends WC_PayPlus_Gateway
         if ($this->id === 'payplus-payment-gateway-pos-emv') {
             $this->settings['show_in_regular_checkout'] = isset($subOptionsettings['show_in_regular_checkout']) ? $subOptionsettings['show_in_regular_checkout'] : 'no';
             $this->settings['show_in_blocks_checkout'] = isset($subOptionsettings['show_in_blocks_checkout']) ? $subOptionsettings['show_in_blocks_checkout'] : 'no';
+        }
+
+        if ($this->id === 'payplus-payment-gateway-applepay') {
+            $this->settings['hide_apple_pay_checkout'] = isset($subOptionsettings['hide_apple_pay_checkout']) ? $subOptionsettings['hide_apple_pay_checkout'] : 'no';
         }
     }
 
@@ -693,6 +707,15 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
         check_ajax_referer('frontNonce', '_ajax_nonce');
         $order_id = '000';
 
+        if (WC_PayPlus_HostedFields::hosted_charge_lock_order_id()) {
+            $this->payplus_add_log_all('hosted-fields-data', 'Regenerate hosted link refused — charge lock active');
+            wp_send_json_success(array(
+                'message' => 'regenerate skipped',
+                'order_id' => WC_PayPlus_HostedFields::hosted_charge_lock_order_id(),
+            ));
+            return;
+        }
+
         WC()->session->set('hostedTimeStamp', false);
         WC()->session->set('page_request_uid', false);
         WC()->session->set('hostedResponse', false);
@@ -728,10 +751,36 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
             $hostedPayload = WC()->session->get('hostedPayload');
             $hostedResponse = WC()->session->get('hostedResponse');
         }
-        
+
+        $payloadArr = [];
+        if (is_array($hostedPayload)) {
+            $payloadArr = $hostedPayload;
+        } elseif (is_string($hostedPayload) && $hostedPayload !== '') {
+            $decoded = json_decode($hostedPayload, true);
+            $payloadArr = is_array($decoded) ? $decoded : [];
+        }
+        $responseArr = [];
+        if (is_array($hostedResponse)) {
+            $responseArr = $hostedResponse;
+        } elseif (is_string($hostedResponse) && $hostedResponse !== '') {
+            $decoded = json_decode($hostedResponse, true);
+            $responseArr = is_array($decoded) ? $decoded : [];
+        }
+
+        $moreInfo = isset($payloadArr['more_info']) ? (string) $payloadArr['more_info'] : '';
+        $moreInfoIsOrder = $moreInfo !== '' && (bool) preg_match('/^\d+$/', $moreInfo) && (int) $moreInfo > 0;
+        $verified = (int) WC()->session->get('payplus_hosted_updated_for_order');
+        $updateFailed = (bool) WC()->session->get('payplus_hosted_update_failed');
+        $responseOk = isset($responseArr['results']['status']) && $responseArr['results']['status'] === 'success'
+            && !empty($responseArr['data']['page_request_uid']);
+        $canSubmit = $moreInfoIsOrder && !$updateFailed && $responseOk && $verified === (int) $moreInfo;
+
         wp_send_json_success(array(
             'hostedPayload' => $hostedPayload,
-            'hostedResponse' => $hostedResponse
+            'hostedResponse' => $hostedResponse,
+            'can_submit' => $canSubmit,
+            'more_info' => $moreInfo,
+            'update_verified' => $verified,
         ));
     }
 
@@ -831,6 +880,7 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
         }
 
         if ($payment_response === "success") {
+            WC_PayPlus_HostedFields::reset_hosted_fields_session();
             WC()->cart->empty_cart();
             $redirect_to = $order->get_checkout_order_received_url();
             $payPlusResponse = WC_PayPlus_Meta_Data::get_meta($order, 'payplus_response');
@@ -871,6 +921,7 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
                 'redirect_url' => $redirect_to
             ));
         } else {
+            WC_PayPlus_HostedFields::release_hosted_charge_lock();
             wp_send_json_error(array('message' => 'Payment failed'));
         }
     }
@@ -929,12 +980,44 @@ class WC_PayPlus_Gateway_HostedFields extends WC_PayPlus_Subgateway
         if ($this->id === "payplus-payment-gateway-hostedfields") {
             if (WC()->session && WC()->session->get('payplus_hosted_update_failed')) {
                 WC()->session->set('payplus_hosted_update_failed', false);
+                WC_PayPlus_HostedFields::release_hosted_charge_lock();
                 wc_add_notice(__('Payment setup could not be completed. Please refresh the page and try again.', 'payplus-payment-gateway'), 'error');
                 return array(
                     'result'  => 'failure',
                     'redirect' => '',
                 );
             }
+
+            // Hard guarantee: only allow the charge if the PayPlus payment page
+            // was successfully updated with THIS order's real data in the current
+            // request (via WC_PayPlus_HostedFields::on_woocommerce_checkout_order_processed
+            // → update_hosted_page_for_order).
+            // If the flag is not set for this exact order id, the browser would
+            // otherwise charge the initial "setup" page that still has placeholder
+            // customer info (general-first-name / general-last-name) and a random
+            // hash in more_info instead of the real order id.
+            $verifiedOrderId = WC()->session ? WC()->session->get('payplus_hosted_updated_for_order') : 0;
+            if (absint($verifiedOrderId) !== absint($order_id)) {
+                $payplus_instance = WC_PayPlus::get_instance();
+                $mainGateway = $payplus_instance->get_main_payplus_gateway();
+                if ($mainGateway) {
+                    $mainGateway->payplus_add_log_all(
+                        'hosted-fields-data',
+                        "HostedFields process_payment REFUSED for Order #$order_id – payment page was not verified as updated (verifiedOrderId=" . ($verifiedOrderId ?: 'null') . "). Refusing charge to prevent placeholder-data payment."
+                    );
+                }
+                WC_PayPlus_HostedFields::release_hosted_charge_lock();
+                WC()->session->set('page_request_uid', false);
+                WC()->session->__unset('hostedFieldsUUID');
+                WC()->session->set('hostedPayload', false);
+                WC()->session->set('hostedResponse', false);
+                wc_add_notice(__('Payment setup could not be completed. Please refresh the page and try again.', 'payplus-payment-gateway'), 'error');
+                return array(
+                    'result'   => 'failure',
+                    'redirect' => '',
+                );
+            }
+
             WC()->session->set('order_awaiting_payment', $order_id);
         }
         return array(
@@ -963,6 +1046,13 @@ function payplus_filter_checkout_gateways($available_gateways)
             
             if (!$show_in_regular_checkout) {
                 unset($available_gateways['payplus-payment-gateway-pos-emv']);
+            }
+        }
+
+        if (isset($available_gateways['payplus-payment-gateway-applepay'])) {
+            $apple_pay_settings = get_option('woocommerce_payplus-payment-gateway-applepay_settings', []);
+            if (isset($apple_pay_settings['hide_apple_pay_checkout']) && $apple_pay_settings['hide_apple_pay_checkout'] === 'yes') {
+                unset($available_gateways['payplus-payment-gateway-applepay']);
             }
         }
 

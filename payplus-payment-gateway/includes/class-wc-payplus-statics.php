@@ -667,7 +667,21 @@ class WC_PayPlus_Statics
             return $response;
         }
 
-        public static function createUpdateHostedPaymentPageLink($payload, $isPlaceOrder = false)
+        /**
+         * Create or Update a Hosted Fields payment page on PayPlus.
+         *
+         * @param string $payload       JSON payload for PayPlus.
+         * @param bool   $isPlaceOrder  True when this call must UPDATE the existing page
+         *                              (i.e. the one the browser's hosted fields are bound to).
+         * @param bool   $strictUpdate  When true and $isPlaceOrder is true, if the session
+         *                              is missing the bound page_request_uid/hostedFieldsUUID
+         *                              we refuse to silently fall back to generateLink
+         *                              (which would create a new page the browser can't reach
+         *                              and would leave the initial setup page open to being
+         *                              charged with placeholder customer data and a random-hash
+         *                              more_info instead of the real order id).
+         */
+        public static function createUpdateHostedPaymentPageLink($payload, $isPlaceOrder = false, $strictUpdate = false)
         {
             $options = get_option('woocommerce_payplus-payment-gateway_settings');
             $testMode = boolval($options['api_test_mode'] === 'yes');
@@ -675,9 +689,42 @@ class WC_PayPlus_Statics
 
             $pageRequestUid = WC()->session->get('page_request_uid');
             $hostedFieldsUUID = WC()->session->get('hostedFieldsUUID');
+            $lockOrder = class_exists('WC_PayPlus_HostedFields') ? WC_PayPlus_HostedFields::hosted_charge_lock_order_id() : 0;
 
-            if ($pageRequestUid && $hostedFieldsUUID && $isPlaceOrder) {
+            $refuseNewPage = static function ($reason) {
+                $existing = WC()->session ? WC()->session->get('hostedResponse') : '';
+                if (!empty($existing)) {
+                    return $existing;
+                }
+                return wp_json_encode([
+                    'results' => [
+                        'status'  => 'error',
+                        'message' => $reason,
+                    ],
+                    'data' => new stdClass(),
+                ]);
+            };
+
+            // Never open a second PayPlus page after Place Order started (slow Blocks re-render).
+            if (!$isPlaceOrder && $lockOrder) {
+                return $refuseNewPage('hosted-charge-locked: refuse generateLink');
+            }
+
+            if ($pageRequestUid && $hostedFieldsUUID) {
+                // Same bound page only — Update, never generateLink.
                 $apiUrl = str_replace("/generateLink", "/Update/$pageRequestUid", $apiUrl);
+            } elseif ($isPlaceOrder && $strictUpdate) {
+                // Requested a strict Update but session lost the binding — refuse.
+                // The caller MUST NOT create a new page here.
+                return wp_json_encode([
+                    'results' => [
+                        'status'  => 'error',
+                        'message' => 'strict-update-unavailable: missing bound page_request_uid/hostedFieldsUUID',
+                    ],
+                    'data' => new stdClass(),
+                ]);
+            } elseif ($lockOrder) {
+                return $refuseNewPage('hosted-charge-locked: refuse generateLink without bound page');
             }
 
             $hostedResponse = WC_PayPlus_Statics::payPlusRemote($apiUrl, $payload, "post");

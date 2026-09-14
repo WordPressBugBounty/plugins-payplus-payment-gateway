@@ -4,8 +4,8 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.2.4
- * Tested up to: 7.0
+ * Version: 8.2.5
+ * Tested up to: 7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
  * Requires PHP: 7.4
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.2.4');
-define('PAYPLUS_VERSION_DB', 'payplus_8_2_4');
+define('PAYPLUS_VERSION', '8.2.5');
+define('PAYPLUS_VERSION_DB', 'payplus_8_2_5');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -116,9 +116,13 @@ class WC_PayPlus
             add_action('payplus_invoice_runner_cron_job', [$this, 'getPayplusInvoiceRunnerCron']);
             add_action('template_redirect', [$this, 'payplus_check_pruid_on_checkout_load'], 5);
             add_action('woocommerce_init', [$this, 'pwgc_remove_processing_redemption'], 11);
+            add_action('woocommerce_checkout_order_processed', [$this, 'payplus_guard_zero_total_checkout'], 5, 3);
+            // After PW Gift Cards / PayPlus attach line items on this hook (default 10).
+            add_action('woocommerce_store_api_checkout_order_processed', [$this, 'payplus_guard_zero_total_checkout_blocks'], 20, 1);
             add_action('woocommerce_checkout_order_processed', [$this, 'payplus_checkout_order_processed'], 25, 3);
             add_action('woocommerce_thankyou', [$this, 'payplus_clear_session_on_order_received'], 10, 1);
             add_action('woocommerce_thankyou', [$this, 'payplus_clear_pw_gift_cards_session'], 10, 1);
+            add_filter('woocommerce_should_clear_cart_after_payment', [$this, 'payplus_should_clear_cart_after_zero_payment'], 10, 1);
             add_action('wp_footer', [$this, 'payplus_thankyou_iframe_redirect_script'], 5);
 
             add_action('woocommerce_cart_calculate_fees', [$this, 'maybe_add_weight_estimate_fee']);
@@ -165,12 +169,191 @@ class WC_PayPlus
      * @param array $posted_data Posted checkout data
      * @param WC_Order $order Order object
      */
+    /**
+     * Blocks / Store API checkout (order object only).
+     *
+     * @param WC_Order $order Order object.
+     * @return void
+     */
+    public function payplus_guard_zero_total_checkout_blocks($order)
+    {
+        if (!$order instanceof WC_Order) {
+            return;
+        }
+        $this->payplus_guard_zero_total_checkout($order->get_id(), array(), $order);
+    }
+
+    /**
+     * Optional fail-safe: abort checkout when a session/cart desync would
+     * complete a product order as unpaid $0 (WooCommerce #68289).
+     *
+     * Runs on woocommerce_checkout_order_processed (classic, priority 5) and
+     * woocommerce_store_api_checkout_order_processed (Blocks, priority 20, after
+     * PW Gift Cards attach line items), before WooCommerce calls
+     * process_order_without_payment() / process_without_payment().
+     *
+     * Uses $order->needs_payment() because the cart may already be empty at
+     * this hook (WooCommerce #24631).
+     *
+     * @param int           $order_id     Order ID.
+     * @param array         $posted_data  Posted checkout data (unused).
+     * @param WC_Order|null $order        Order object.
+     * @return void
+     */
+    public function payplus_guard_zero_total_checkout($order_id, $posted_data, $order)
+    {
+        unset($posted_data);
+
+        $settings = get_option('woocommerce_payplus-payment-gateway_settings', array());
+        if (
+            !is_array($settings)
+            || !isset($settings['enable_dev_mode']) || $settings['enable_dev_mode'] !== 'yes'
+            || !isset($settings['prevent_unpaid_zero_total_orders']) || $settings['prevent_unpaid_zero_total_orders'] !== 'yes'
+        ) {
+            return;
+        }
+
+        if (!$order instanceof WC_Order) {
+            $order = wc_get_order(absint($order_id));
+        }
+        if (!$order instanceof WC_Order) {
+            return;
+        }
+
+        $subtotal = (float) $order->get_subtotal('edit');
+        $total = (float) $order->get_total('edit');
+        if ($subtotal <= 0) {
+            return;
+        }
+
+        $is_legitimately_free = $this->payplus_is_legitimately_free_order($order, $subtotal);
+
+        if ($total <= 0 && !$is_legitimately_free) {
+            $this->payplus_throw_checkout_guard_error(
+                'payplus_unpaid_zero_total',
+                __('An error occurred while calculating your order total. Please refresh the page and try again.', 'payplus-payment-gateway')
+            );
+        }
+
+        // $order->needs_payment() already applies woocommerce_order_needs_payment (WC's current API).
+        if ($total > 0 && !$order->needs_payment() && !$is_legitimately_free) {
+            $this->payplus_throw_checkout_guard_error(
+                'payplus_payment_required',
+                __('This order requires payment and cannot be completed without it. Please try again.', 'payplus-payment-gateway')
+            );
+        }
+    }
+
+    /**
+     * True 100% coupon, PW Gift Card line items, or gift cards still in the WC session.
+     *
+     * Classic often stores discount ex-tax, so discount_total can be less than
+     * subtotal even on a real 100% coupon. Coupon line items / cart codes are
+     * the WooCommerce source of truth. Blocks adds pw_gift_card items later
+     * on woocommerce_store_api_checkout_order_processed (priority 10).
+     *
+     * @param WC_Order $order    Order object.
+     * @param float    $subtotal Order subtotal.
+     * @return bool
+     */
+    private function payplus_is_legitimately_free_order($order, $subtotal)
+    {
+        $discount = (float) $order->get_discount_total('edit') + (float) $order->get_discount_tax('edit');
+        $items_total = $subtotal + (float) $order->get_cart_tax('edit');
+        if ($discount + 0.01 >= $subtotal || $discount + 0.01 >= $items_total) {
+            return true;
+        }
+        if ($this->payplus_order_has_applied_coupons($order)) {
+            return true;
+        }
+        if (!empty($order->get_items('pw_gift_card'))) {
+            return true;
+        }
+        if (class_exists('WC_PayPlus_Meta_Data', false) && !empty(WC_PayPlus_Meta_Data::get_meta($order->get_id(), 'payplus_pw_gift_cards'))) {
+            return true;
+        }
+
+        $session_cards = $this->payplus_get_applied_pw_gift_cards();
+        return !empty($session_cards);
+    }
+
+    /**
+     * Coupons already on the order, or still on the cart (Classic checkout).
+     *
+     * @param WC_Order $order Order object.
+     * @return bool
+     */
+    private function payplus_order_has_applied_coupons($order)
+    {
+        if (is_callable(array($order, 'get_coupon_codes')) && !empty($order->get_coupon_codes())) {
+            return true;
+        }
+        if (!empty($order->get_items('coupon'))) {
+            return true;
+        }
+        if (function_exists('WC') && WC()->cart && is_callable(array(WC()->cart, 'get_applied_coupons'))) {
+            $cart_coupons = WC()->cart->get_applied_coupons();
+            if (!empty($cart_coupons)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Gift cards applied this checkout (PayPlus capture or PW session).
+     *
+     * @return array
+     */
+    private function payplus_get_applied_pw_gift_cards()
+    {
+        if (!empty($this->pwGiftCardData['gift_cards']) && is_array($this->pwGiftCardData['gift_cards'])) {
+            return $this->pwGiftCardData['gift_cards'];
+        }
+        if (!function_exists('WC') || !WC()->session) {
+            return array();
+        }
+        $session_key = defined('PWGC_SESSION_KEY') ? PWGC_SESSION_KEY : 'pw-gift-card-data';
+        $session_data = WC()->session->get($session_key);
+        if (is_array($session_data) && !empty($session_data['gift_cards']) && is_array($session_data['gift_cards'])) {
+            return $session_data['gift_cards'];
+        }
+        return array();
+    }
+
+    /**
+     * Abort checkout the way WooCommerce expects: Exception on classic
+     * (caught in WC_Checkout::process_checkout), RouteException on Store API.
+     *
+     * @param string $error_code Prefixed machine-readable code.
+     * @param string $message    Translated user-facing message.
+     * @return void
+     */
+    private function payplus_throw_checkout_guard_error($error_code, $message)
+    {
+        $message = wp_strip_all_tags($message);
+
+        if (defined('REST_REQUEST') && REST_REQUEST && class_exists('\Automattic\WooCommerce\StoreApi\Exceptions\RouteException', false)) {
+            throw new \Automattic\WooCommerce\StoreApi\Exceptions\RouteException(
+                sanitize_key($error_code),
+                esc_html($message),
+                400
+            );
+        }
+
+        throw new Exception(esc_html($message));
+    }
+
     public function payplus_checkout_order_processed($order_id, $posted_data, $order)
     {
         // Check if this is a PayPlus payment method (any method starting with 'payplus-payment-gateway') but not hosted fields
         $payment_method = $order->get_payment_method();
         if (strpos($payment_method, 'payplus-payment-gateway') !== 0 || $payment_method === 'payplus-payment-gateway-hostedfields') {
             return; // Only process for PayPlus payments (excluding hosted fields)
+        }
+        // $0 / gift-card orders never open a PayPlus page — do not treat as awaiting payment.
+        if ((float) $order->get_total('edit') <= 0 || !$order->needs_payment()) {
+            return;
         }
         WC()->session->set('page_order_awaiting_payment', $order_id);
     }
@@ -275,6 +458,32 @@ class WC_PayPlus
     }
 
     /**
+     * WooCommerce may skip emptying the cart on thank-you when the cart hash
+     * no longer matches (PW Gift Cards) after a $0 process_order_without_payment.
+     *
+     * @param bool $should_clear Whether WooCommerce will empty the cart.
+     * @return bool
+     */
+    public function payplus_should_clear_cart_after_zero_payment($should_clear)
+    {
+        if ($should_clear) {
+            return true;
+        }
+        global $wp;
+        if (empty($wp->query_vars['order-received'])) {
+            return $should_clear;
+        }
+        $order = wc_get_order(absint($wp->query_vars['order-received']));
+        if (!$order instanceof WC_Order || $order->has_status(array('pending', 'failed', 'cancelled'))) {
+            return $should_clear;
+        }
+        if ((float) $order->get_total('edit') <= 0 || !empty($order->get_items('pw_gift_card'))) {
+            return true;
+        }
+        return $should_clear;
+    }
+
+    /**
      * Clear session and cart when customer successfully completes order and reaches thank you page
      * 
      * @param int $order_id The order ID
@@ -290,20 +499,23 @@ class WC_PayPlus
             return;
         }
 
-        // Only clear for PayPlus payment methods (not hosted fields - they use order_awaiting_payment)
         $payment_method = $order->get_payment_method();
-        if (strpos($payment_method, 'payplus-payment-gateway') !== 0 || $payment_method === 'payplus-payment-gateway-hostedfields') {
+        $is_payplus = (strpos($payment_method, 'payplus-payment-gateway') === 0);
+        $is_hosted_fields = ($payment_method === 'payplus-payment-gateway-hostedfields');
+        $is_zero_or_gift = ((float) $order->get_total('edit') <= 0 || !empty($order->get_items('pw_gift_card')));
+
+        // Paid Hosted Fields still uses order_awaiting_payment until IPN.
+        if ($is_hosted_fields && !$is_zero_or_gift) {
+            return;
+        }
+        if (!$is_payplus && !$is_zero_or_gift) {
             return;
         }
 
-        // Clear cart
         if (WC()->cart) {
-            WC()->cart->empty_cart();
+            WC()->cart->empty_cart(true);
         }
 
-        // Unset both our custom session key and WC's own order_awaiting_payment.
-        // WC's get_cart_from_session() restores cart items from a pending order when
-        // order_awaiting_payment is still set — clearing it stops that re-hydration.
         if (WC()->session) {
             WC()->session->__unset('page_order_awaiting_payment');
             WC()->session->__unset('order_awaiting_payment');
@@ -637,13 +849,7 @@ class WC_PayPlus
         $PayPlusAdminPayments = new WC_PayPlus_Admin_Payments;
         $_wpnonce = wp_create_nonce('_wp_payplusIpn');
         $PayPlusAdminPayments->payplusIpn($order_id, $_wpnonce, $saveToken, true);
-        WC()->session->set('hostedTimeStamp', false);
-        WC()->session->set('hostedPayload', false);
-        WC()->session->set('page_request_uid', false);
-        WC()->session->set('hostedResponse', false);
-        WC()->session->__unset('hostedFieldsUUID');
-        WC()->session->set('hostedStarted', false);
-        WC()->session->set('randomHash', bin2hex(random_bytes(16)));
+        WC_PayPlus_HostedFields::reset_hosted_fields_session();
         WC()->session->set('payplus_verified_order', $order_id);
         wp_send_json_success(array('result' => "success"));
     }
@@ -1822,6 +2028,7 @@ body{
                         }
 
                         add_filter('woocommerce_payment_gateways', [$this, 'add_payplus_gateway'], 20);
+                        $this->register_payplus_admin_menus();
                         payplusUpdateActivate();
                         return;
                     }
@@ -1837,8 +2044,10 @@ body{
                     new WC_PayPlus_Product_Syncer();
 
                     if (is_array($this->hostedFieldsOptions) && boolval($this->hostedFieldsOptions['enabled'] === "yes")) {
-                        require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-embedded.php';
-                        new WC_PayPlus_Embedded();
+                        // Register the plugin-init hooks that used to live on WC_PayPlus_Embedded
+                        // (woocommerce_checkout_order_processed strict-Update + pwgc gift-card session capture).
+                        // Both responsibilities now live on WC_PayPlus_HostedFields directly.
+                        WC_PayPlus_HostedFields::register_hooks();
                     }
 
                     if (did_action('woocommerce_blocks_loaded')) {
@@ -1894,6 +2103,7 @@ body{
 
                     add_action('save_post', [$this, 'payplus_save_meta_box_data']);
                     add_filter('woocommerce_payment_gateways', [$this, 'add_payplus_gateway'], 20);
+                    $this->register_payplus_admin_menus();
                     payplusUpdateActivate();
                     if ($this->isApplePayGateWayEnabled || $this->isApplePayExpressEnabled) {
                         payplus_add_file_ApplePay();
@@ -1999,7 +2209,7 @@ body{
 
                 // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Core WordPress filter
                 $isElementor = in_array('elementor/elementor.php', apply_filters('active_plugins', get_option('active_plugins')));
-                $isEnableOneClick = (isset($this->payplus_payment_gateway_settings->enable_google_pay) && $this->payplus_payment_gateway_settings->enable_google_pay === "yes") ||
+                $isEnableOneClick = (class_exists('WC_PayPlus_Gateway') && WC_PayPlus_Gateway::is_google_pay_express_enabled($this->payplus_payment_gateway_settings)) ||
                     (isset($this->payplus_payment_gateway_settings->enable_apple_pay) && $this->payplus_payment_gateway_settings->enable_apple_pay === "yes");
                 if (is_checkout() || is_product() || is_cart() || $isElementor) {
                     if (
@@ -2472,6 +2682,24 @@ body{
             }
 
             /**
+             * Register admin bar and WooCommerce submenu items on every admin request.
+             * Do not hook these from woocommerce_payment_gateways — WooCommerce no longer
+             * boots gateways on every admin screen.
+             *
+             * @return void
+             */
+            public function register_payplus_admin_menus()
+            {
+                require_once PAYPLUS_PLUGIN_DIR . '/includes/class-wc-payplus-form-fields.php';
+                $payplus_payment_gateway_settings = get_option('woocommerce_payplus-payment-gateway_settings', []);
+                $hide_header = isset($payplus_payment_gateway_settings['disable_menu_header']) && $payplus_payment_gateway_settings['disable_menu_header'] === 'yes';
+                if (!$hide_header) {
+                    add_action('admin_bar_menu', ['WC_PayPlus_Form_Fields', 'adminBarMenu'], 100);
+                }
+                add_action('admin_menu', ['WC_PayPlus_Form_Fields', 'addAdminPageMenu'], 59);
+            }
+
+            /**
              * @param array $methods
              * @return array
              */
@@ -2494,15 +2722,6 @@ body{
                     $methods[] = 'WC_PayPlus_Gateway_HostedFields';
                     $methods[] = 'WC_PayPlus_Gateway_POS_EMV';
                     $methods[] = 'WC_PayPlus_Gateway_WireTransfer';
-                }
-                $payplus_payment_gateway_settings = get_option('woocommerce_payplus-payment-gateway_settings');
-                if ($payplus_payment_gateway_settings) {
-                    if (isset($payplus_payment_gateway_settings['disable_menu_header']) && $payplus_payment_gateway_settings['disable_menu_header'] !== "yes") {
-                        add_action('admin_bar_menu', ['WC_PayPlus_Form_Fields', 'adminBarMenu'], 100);
-                    }
-                    if (isset($payplus_payment_gateway_settings['disable_menu_side']) && $payplus_payment_gateway_settings['disable_menu_side'] !== "yes") {
-                        add_action('admin_menu', ['WC_PayPlus_Form_Fields', 'addAdminPageMenu'], 99);
-                    }
                 }
                 return $methods;
             }
