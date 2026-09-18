@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.2.5
+ * Version: 8.2.6
  * Tested up to: 7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.2.5');
-define('PAYPLUS_VERSION_DB', 'payplus_8_2_5');
+define('PAYPLUS_VERSION', '8.2.6');
+define('PAYPLUS_VERSION_DB', 'payplus_8_2_6');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -793,10 +793,12 @@ class WC_PayPlus
     {
         check_ajax_referer('frontNonce', '_ajax_nonce');
         $this->payplus_gateway = $this->get_main_payplus_gateway();
-        $order_id = isset($_POST['order_id']) ? intval($_POST['order_id']) : 0;
-
-        if (!$order_id) {
-            wp_send_json_error(['result' => 'fail', 'message' => 'Invalid order ID']);
+        $order_id = WC_PayPlus_Statics::order_id_from_more_info(
+            isset($_POST['order_id']) ? sanitize_text_field(wp_unslash($_POST['order_id'])) : ''
+        );
+        $session_order_id = WC()->session ? WC()->session->get('order_awaiting_payment') : null;
+        if (!$order_id || !WC_PayPlus_Statics::more_info_matches_order($order_id, $session_order_id)) {
+            wp_send_json_error(['result' => 'fail', 'message' => 'Order id does not match the current checkout order']);
             return;
         }
 
@@ -807,7 +809,6 @@ class WC_PayPlus
         }
 
         $order_key_param = isset($_POST['order_key']) ? sanitize_text_field(wp_unslash($_POST['order_key'])) : '';
-        $session_order_id = WC()->session ? WC()->session->get('order_awaiting_payment') : null;
         $owns_order = false;
 
         if ($order_key_param && hash_equals($order->get_order_key(), $order_key_param)) {
@@ -1369,7 +1370,9 @@ class WC_PayPlus
     {
         $nonce = isset($_REQUEST['_wpnonce']) ? sanitize_text_field(wp_unslash($_REQUEST['_wpnonce'])) : '';
         if (!wp_verify_nonce($nonce, 'payload_link')) {
-            $order_id = isset($_REQUEST['more_info']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info'])) : false;
+            $order_id = WC_PayPlus_Statics::order_id_from_more_info(
+                isset($_REQUEST['more_info']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info'])) : ''
+            );
             if ($order_id) {
                 //failed nonce check, will be redirected to regular thank you page with ipn
                 $order = wc_get_order($order_id);
@@ -1396,7 +1399,18 @@ class WC_PayPlus
             $REQUEST = json_decode(stripslashes($REQUEST['jsonData']), true)['data'];
         }
 
-        $order_id = isset($REQUEST['more_info']) ? sanitize_text_field(wp_unslash($REQUEST['more_info'])) : '';
+        $order_id = WC_PayPlus_Statics::order_id_from_more_info(
+            isset($REQUEST['more_info']) ? $REQUEST['more_info'] : ''
+        );
+        if (!empty($REQUEST['more_info']) && $order_id === 0) {
+            $this->payplus_gateway->payplus_add_log_all(
+                'hosted-fields-data',
+                'IPN refused — more_info is not a WooCommerce order id: ' . sanitize_text_field((string) $REQUEST['more_info'])
+            );
+            status_header(200);
+            echo 'ignored';
+            exit;
+        }
         $order = wc_get_order($order_id);
         $this->updateStatusesIpn ? $this->checkRunIpnResponse($order_id, $order, 2) : null;
 
@@ -2567,9 +2581,12 @@ body{
                 $payplusHash = isset($_SERVER['HTTP_HASH']) ? sanitize_text_field($_SERVER['HTTP_HASH']) : ""; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.MissingUnslash
                 $payplusGenHash = base64_encode(hash_hmac('sha256', $json, $this->secret_key, true));
 
-                if ($payplusGenHash === $payplusHash) {
+                // SECURITY FIX: use constant-time comparison to prevent timing attacks
+                if (hash_equals($payplusGenHash, $payplusHash)) {
                     $this->payplus_gateway = $this->get_main_payplus_gateway();
-                    $order_id = intval($response['transaction']['more_info']);
+                    $order_id = WC_PayPlus_Statics::order_id_from_more_info(
+                        isset($response['transaction']['more_info']) ? $response['transaction']['more_info'] : ''
+                    );
                     if ($order_id === 0) {
                         // Log an error or handle the case where order_id is invalid
                         $this->payplus_gateway->payplus_add_log_all(
