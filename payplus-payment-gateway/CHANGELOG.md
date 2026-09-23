@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [8.2.8]  - 09-23-2026 - (Bomber)
+
+- Fix       - Invoice+: the payment callback (`payplusIpn`) no longer creates a document when Invoice Creation Mode is Manual. `payplus_invoice_create_order()` now refuses every automatic caller in Manual mode. The admin create-document action still issues the document.
+- Fix       - Hosted Fields: the browser completion and the PayPlus callback no longer both call payment_complete(). The second path skips once the order is already paid, so "Payment complete", "New order", and "Processing order" are sent once. Other payment methods are unchanged.
+
+## [8.2.7]  - 09-23-2026 - (Bomber)
+
+- Fix       - Invoice+: Manual invoice creation mode is now properly respected in all code paths. When Invoice Creation Mode is set to "Manual", invoices are no longer automatically created during callback/IPN processing, cron runner execution, validator tool runs, or other automatic triggers. Manual mode now requires explicit admin action to create invoices.
+
 ## [8.2.6]  - 09-18-2026 - (Air)
 
 - Security  - Fixed CVSS 6.5 Broken Access Control vulnerability: merchant PayPlus API secret key is no longer exposed in WooCommerce Blocks frontend payment data or Store API checkout response. (Reported by mamgad via Patchstack)
