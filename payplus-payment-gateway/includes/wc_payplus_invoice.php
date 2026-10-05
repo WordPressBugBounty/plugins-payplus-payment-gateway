@@ -99,7 +99,7 @@ class PayplusInvoice
 
         $this->logging = true;
 
-        $this->payment_method = array('credit-card', 'bit', 'apple-pay', 'google-pay', 'paypal');
+        $this->payment_method = array('credit-card', 'bit', 'apple-pay', 'google-pay', 'paypal', 'wire-transfers');
         $this->payment_method_club = array('multipass', 'valuecard', 'tav-zahav', 'finitione');
         $this->url_payplus_create_invoice .= $this->payplus_api_url . "books/docs/new/";
         $this->url_payplus_get_invoice .= $this->payplus_api_url . "books/docs/getBy/unique_identifier/";
@@ -554,6 +554,9 @@ class PayplusInvoice
     {
         $order = wc_get_order($order_id);
         $typePaymentMethod = $order->get_payment_method();
+        if (in_array($typePaymentMethod, ['ppcp-gateway', 'ppcp-credit-card-gateway', 'ppec_paypal', 'payplus-payment-gateway-paypal'], true)) {
+            $typePaymentMethod = 'paypal';
+        }
         if (isset($this->payplus_invoice_option['do-not-create']) && in_array($typePaymentMethod, $this->payplus_invoice_option['do-not-create'])) {
             $order->add_order_note('This payment method is set as: Not to create documents automatically');
             return;
@@ -1144,6 +1147,10 @@ class PayplusInvoice
             'payplus-payment-gateway-applepay' => 'apple-pay',
             'payplus-payment-gateway-multipass' => 'multipass',
             'payplus-payment-gateway-paypal' => 'paypal',
+            'ppcp-gateway' => 'paypal',
+            'ppcp-credit-card-gateway' => 'paypal',
+            'ppec_paypal' => 'paypal',
+            'paypal' => 'paypal',
             'payplus-payment-gateway-tavzahav' => 'tav-zahav',
             'payplus-payment-gateway-valuecard' => 'valuecard',
             'payplus-payment-gateway-finitione' => 'finitione',
@@ -1247,7 +1254,7 @@ class PayplusInvoice
             'method_payment' => $method_payment,
             'price' => $price,
         ];
-        if ($method_payment === 'credit-card' || in_array($method_payment, $this->payment_method_club, true)) {
+        if ($method_payment === 'credit-card' || $method_payment === 'wire-transfers' || in_array($method_payment, $this->payment_method_club, true)) {
             $paymentArray['four_digits'] = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_four_digits', true);
         }
         if ($method_payment === 'credit-card') {
@@ -1356,6 +1363,9 @@ class PayplusInvoice
                 // but can be identified by the payplus_response_emv meta
                 $isEmvOrder = !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response_emv'));
                 $effectiveMethod = $isEmvOrder ? 'payplus-payment-gateway-pos-emv' : $typePaymentMethodEarly;
+                if (in_array($effectiveMethod, ['ppcp-gateway', 'ppcp-credit-card-gateway', 'ppec_paypal', 'payplus-payment-gateway-paypal'], true)) {
+                    $effectiveMethod = 'paypal';
+                }
 
                 if (in_array($effectiveMethod, $doNotCreate, true)) {
                     $order->add_order_note('This payment method is set as: Not to create documents automatically');
@@ -1377,8 +1387,11 @@ class PayplusInvoice
                     $payplusUniqueIdentifier = "payplus_order_$typeInvoice" . $order_id . $this->payplus_unique_identifier . $this->payplus_invoice_option['payplus_website_code'];
 
                     $j5 = ($this->payplus_get_invoice_enable() && $payplusType === "Charge");
+                    // PayPlus Authorization must not block PayPal and other non-PayPlus gateways.
+                    // Those orders never receive payplus_type=Charge.
+                    $nonPayplusOrder = $wc_method !== '' && strpos($wc_method, 'payplus') !== 0;
 
-                    if ($invoice_manual || $j5 || ($this->payplus_gateway_option['enabled'] === "no" || ($this->payplus_gateway_option['transaction_type'] !== "2"
+                    if ($invoice_manual || $j5 || $nonPayplusOrder || ($this->payplus_gateway_option['enabled'] === "no" || ($this->payplus_gateway_option['transaction_type'] !== "2"
                         && $payplusType !== "Check" && $payplusType !== "Approval"))) {
                         $payplus_document_type = ($typeInvoice) ? $typeInvoice : $this->payplus_invoice_option['payplus_invoice_type_document'];
                         $typePaymentMethod = $order->get_payment_method();
@@ -1779,6 +1792,9 @@ class PayplusInvoice
                 $resultApp = $resultApps[$i];
                 $create_at = property_exists($resultApp, 'create_at') ? $resultApp->create_at : null;
                 $resultApp->method_payment = strtolower((string) $resultApp->method_payment);
+                if ($resultApp->method_payment === 'wire-transfers') {
+                    $resultApp->method_payment = 'bank-transfer';
+                }
                 $paymentType = 'payment-app';
                 $typePayment = array();
                 if (in_array($resultApp->method_payment, array('credit-card', 'paypal', 'other', 'cash', 'payment-check', 'bank-transfer', 'withholding-tax', 'wire-transfers'))) {
@@ -1828,6 +1844,24 @@ class PayplusInvoice
                     $typePayment['bank_number'] = $resultApp->bank_number;
                     if ($paymentType == 'payment-check') {
                         $typePayment['check_number'] = $resultApp->check_number;
+                    }
+                }
+                if ($paymentType == "bank-transfer" && empty($typePayment['description'])) {
+                    $bankAccount = '';
+                    $rawDigits = trim((string) ($resultApp->four_digits ?? ''));
+                    if ($rawDigits === '' && !empty($resultApp->payplus_response)) {
+                        $savedIpn = json_decode($resultApp->payplus_response, true);
+                        if (is_array($savedIpn)) {
+                            $rawDigits = trim((string) ($savedIpn['four_digits'] ?? ($savedIpn['extra_3'] ?? '')));
+                        }
+                    }
+                    if ($rawDigits !== '' && !preg_match('/^\d{3,4}$/', $rawDigits)) {
+                        $bankAccount = $rawDigits;
+                    } elseif (!empty($resultApp->account_number)) {
+                        $bankAccount = (string) $resultApp->account_number;
+                    }
+                    if ($bankAccount !== '') {
+                        $typePayment['description'] = $bankAccount;
                     }
                 }
                 if (!empty($create_at)) {

@@ -4,7 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.2.8
+ * Version: 8.2.9
  * Tested up to: 7.1
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
@@ -19,8 +19,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.2.8');
-define('PAYPLUS_VERSION_DB', 'payplus_8_2_8');
+define('PAYPLUS_VERSION', '8.2.9');
+define('PAYPLUS_VERSION_DB', 'payplus_8_2_9');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
@@ -1051,6 +1051,7 @@ class WC_PayPlus
 
             // Check if order uses PayPlus payment method
             $payment_method = $order->get_payment_method();
+            $doNotCreateMethod = in_array($payment_method, ['ppcp-gateway', 'ppcp-credit-card-gateway', 'ppec_paypal', 'payplus-payment-gateway-paypal'], true) ? 'paypal' : $payment_method;
 
             // Process all orders regardless of payment method
             $payPlusInvoiceOptions = get_option('payplus_invoice_option');
@@ -1058,7 +1059,7 @@ class WC_PayPlus
             if (
                 isset($payPlusInvoiceOptions['do-not-create']) &&
                 is_array($payPlusInvoiceOptions['do-not-create']) &&
-                in_array($payment_method, $payPlusInvoiceOptions['do-not-create'])
+                in_array($doNotCreateMethod, $payPlusInvoiceOptions['do-not-create'])
             ) {
 
                 $this->payplus_gateway->payplus_add_log_all('payplus-invoice-runner-log', "$order_id: Payment method '$payment_method' is in do-not-create list - skipping invoice creation.\n");
@@ -1368,15 +1369,42 @@ class WC_PayPlus
      */
     public function ipn_response()
     {
+        // Payment page "POST" return mode (redirect / iframe / popup): the fields arrive in the body.
+        $isPostReturn = isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST' && !(isset($_GET['hostedFields']) && $_GET['hostedFields'] === "true"); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- gateway return URL; payment is confirmed server-side via PayPlus IPN
+        if ($isPostReturn) {
+            $postBody = $_POST; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- verified below / via PayPlus IPN
+            if (empty($postBody)) {
+                $rawBody = file_get_contents('php://input');
+                if (!empty($rawBody)) {
+                    $postBody = json_decode($rawBody, true);
+                    if (!is_array($postBody)) {
+                        $postBody = [];
+                        parse_str($rawBody, $postBody);
+                    }
+                }
+            }
+            if (is_array($postBody) && !isset($postBody['more_info']) && isset($postBody['data']) && is_array($postBody['data'])) {
+                $postBody = array_merge($postBody, $postBody['data']);
+            }
+            if (is_array($postBody) && !empty($postBody)) {
+                $_REQUEST = array_merge($_REQUEST, $postBody); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- gateway return URL; payment is confirmed server-side via PayPlus IPN
+            }
+        }
+
         $nonce = isset($_REQUEST['_wpnonce']) ? sanitize_text_field(wp_unslash($_REQUEST['_wpnonce'])) : '';
         if (!wp_verify_nonce($nonce, 'payload_link')) {
             $order_id = WC_PayPlus_Statics::order_id_from_more_info(
                 isset($_REQUEST['more_info']) ? sanitize_text_field(wp_unslash($_REQUEST['more_info'])) : ''
             );
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce cannot survive a cross-site POST; payment is confirmed server-side via PayPlus IPN
+            if (!$order_id && $isPostReturn && isset($_GET['success_order_id'])) {
+                $order_id = absint($_GET['success_order_id']); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            }
             if ($order_id) {
                 //failed nonce check, will be redirected to regular thank you page with ipn
                 $order = wc_get_order($order_id);
-                $this->updateStatusesIpn ? $this->checkRunIpnResponse($order_id, $order, 1) : null;
+                // POST returns never carry the session cookie, so the nonce always fails — confirm with PayPlus IPN.
+                ($this->updateStatusesIpn || ($isPostReturn && $order)) ? $this->checkRunIpnResponse($order_id, $order, 1) : null;
                 if (WC()->cart) {
                     WC()->cart->empty_cart();
                 }
@@ -1385,7 +1413,12 @@ class WC_PayPlus
                 }
                 $this->payplus_clear_pw_gift_cards_session_data();
                 $redirect_to = add_query_arg('order-received', $order_id, get_permalink(wc_get_page_id('checkout')));
+                if ($isPostReturn && $order) {
+                    $redirect_to = $this->get_main_payplus_gateway()->get_return_url($order);
+                }
                 $this->payplus_redirect_graceful($redirect_to);
+                // payplus_redirect_graceful() returns without exiting for non-browser requests.
+                exit;
             } else {
                 // no order id
                 wp_die('Invalid request');

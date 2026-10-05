@@ -297,6 +297,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         // Hook the custom function to the scheduled event
         add_action('payplus_after_process_payment_event', array($this, 'payplus_after_process_payment_function'));
         add_action('woocommerce_checkout_order_processed', [$this, 'pwGiftCardsOnNoPayment'], 10, 3);
+        add_action('woocommerce_payment_complete', [__CLASS__, 'payplusMarkPaymentCompleteSent'], 1);
         $this->isPosOverrideGateways ? add_action('woocommerce_order_status_changed', [$this, 'payplusCheckPaymentGatewayId'], 10, 1) : null;
 
         /****** ACTION END ******/
@@ -2168,12 +2169,14 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 if ($response->data->type == "Charge") {
                     if ($this->fire_completed && $this->successful_order_status === 'default-woo') {
                         // WC_PayPlus_Meta_Data::sendMoreInfo($order, 'process_payment->firePaymentComplete', $transactionUid);
-                        $order->payment_complete();
+                        $this->payplusPaymentComplete($order, 'saved card (token) checkout payment');
                     }
 
                     if ($this->successful_order_status !== 'default-woo') {
                         // WC_PayPlus_Meta_Data::sendMoreInfo($order,  'process_payment->' . $this->successful_order_status, $transactionUid);
+                        $statusBefore = $order->get_status();
                         $order->update_status($this->successful_order_status);
+                        $this->payplusEnsurePaymentCompleteHook($order, 'saved card (token) checkout payment', $statusBefore);
                     }
                 } else {
                     // WC_PayPlus_Meta_Data::sendMoreInfo($order,  'process_payment->wc-on-hold', $transactionUid);
@@ -3602,45 +3605,17 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->payplus_add_log_all($handle, 'New  ipn  Fired (' . $order_id . ')');
         $this->payplus_add_log_all($handle, 'Result: ' . wp_json_encode($data));
 
-        // Original validateOrder status transitions (unchanged), with normalized status_code.
-        $applyValidateStatus = true;
-        $validateStatusLocked = false;
-        if ($this->preventDuplicatePaymentComplete) {
-            $validateStatusLocked = $this->acquireOrderStatusLock($order_id);
-            if (!$validateStatusLocked) {
-                $this->payplus_add_log_all($handle, "Order #{$order_id} validateOrder status skipped (duplicate-payment lock not acquired)");
-                $applyValidateStatus = false;
-            } else {
-                $order = wc_get_order($order_id);
-                if ($this->orderAlreadyPaidOrComplete($order)) {
-                    $this->payplus_add_log_all($handle, "Order #{$order_id} validateOrder status skipped (already paid / status={$order->get_status()})");
-                    $applyValidateStatus = false;
-                }
-            }
-        }
-        if ($applyValidateStatus) {
-            if ($data['type'] === 'Approval' && $this->isApprovedStatusCode($data['status_code'])) {
-                $order->update_status('wc-on-hold');
-            } elseif ($data['type'] === 'Charge' && $this->isApprovedStatusCode($data['status_code'])) {
-                if ($this->fire_completed && $this->successful_order_status === 'default-woo') {
-                    $order->payment_complete();
-                } elseif ($this->successful_order_status !== 'default-woo') {
-                    $order->update_status($this->successful_order_status);
-                }
-            }
-        }
-        if ($validateStatusLocked) {
-            $this->releaseOrderStatusLock($order_id);
+        // Return-URL fields (type, status_code, uids) are user-controlled and are never trusted:
+        // the status is set only by requestPayPlusIpn() -> updateOrderStatus() after PayPlus confirms
+        // the transaction server-side, and only a payment page this order created may be checked.
+        $orderPageRequestUids = array_column(WC_PayPlus_Meta_Data::get_pruid_history($order_id), 'uid');
+        if (empty($page_request_uid) || !in_array($page_request_uid, $orderPageRequestUids, true)) {
+            $this->payplus_add_log_all($handle, "Order #{$order_id} return URL ignored: page_request_uid " . sanitize_text_field((string) $page_request_uid) . ' was not created for this order. Left to the PayPlus callback / IPN check.', 'error');
+            return $order;
         }
 
         $payload = [];
-        if (!empty($page_request_uid)) {
-            $payload['payment_request_uid'] = $page_request_uid;
-        } elseif (!empty($transaction_uid)) {
-            $payload['transaction_uid'] = $transaction_uid;
-        } else {
-            $payload['more_info'] = $order_id;
-        }
+        $payload['payment_request_uid'] = $page_request_uid;
         $payload['related_transaction'] = true;
 
         $payload = wp_json_encode($payload);
@@ -3745,6 +3720,124 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     }
 
     /**
+     * Where the current request came from (callback, return URL, cron, admin ajax...), for the payment-complete log.
+     *
+     * @return string
+     */
+    protected function payplusRequestContext()
+    {
+        if (wp_doing_cron()) {
+            return 'cron';
+        }
+        $parts = [isset($_SERVER['REQUEST_METHOD']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD'])) : 'CLI'];
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only, used for logging
+        if (isset($_GET['wc-api'])) {
+            $parts[] = 'wc-api=' . sanitize_text_field(wp_unslash($_GET['wc-api'])); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        }
+        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only, used for logging
+        if (isset($_REQUEST['action'])) {
+            $parts[] = 'action=' . sanitize_text_field(wp_unslash($_REQUEST['action'])); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        }
+        return implode(' ', $parts);
+    }
+
+    /**
+     * @param int $order_id
+     * @param string $source
+     * @param string $result
+     * @return void
+     */
+    protected function payplusLogPaymentComplete($order_id, $source, $result)
+    {
+        $this->payplus_add_log_all(
+            'payplus_payment_complete',
+            "Order #$order_id | process: $source | request: " . $this->payplusRequestContext() . " | $result"
+        );
+    }
+
+    /**
+     * Marks the order once woocommerce_payment_complete was sent for it (by any code path),
+     * so payplusEnsurePaymentCompleteHook() never sends it a second time.
+     *
+     * @param int $order_id
+     * @return void
+     */
+    public static function payplusMarkPaymentCompleteSent($order_id)
+    {
+        $order = wc_get_order($order_id);
+        if ($order && strpos((string) $order->get_payment_method(), 'payplus-payment-gateway') === 0 && !$order->get_meta('_payplus_payment_complete_sent')) {
+            $order->update_meta_data('_payplus_payment_complete_sent', time());
+            $order->save_meta_data();
+        }
+    }
+
+    /**
+     * $order->payment_complete() exactly as before, plus a "payplus_payment_complete" log entry.
+     *
+     * @param WC_Order $order
+     * @param string $source
+     * @return bool
+     */
+    public function payplusPaymentComplete($order, $source)
+    {
+        $statusBefore = $order->get_status();
+        $sentBefore = did_action('woocommerce_payment_complete');
+        $result = $order->payment_complete();
+        $sent = did_action('woocommerce_payment_complete') > $sentBefore;
+        $this->payplusLogPaymentComplete(
+            $order->get_id(),
+            $source,
+            'woocommerce_payment_complete: ' . ($sent ? 'SENT (payment_complete)' : "NOT SENT (order was already '$statusBefore')")
+                . " | status: $statusBefore => " . $order->get_status()
+        );
+        return $result;
+    }
+
+    /**
+     * Paths that set the successful status directly (without payment_complete()) never sent
+     * woocommerce_payment_complete. Send only the hook - status and emails are untouched - when
+     * "Payment Completed" is on, this request moved the order from unpaid to paid, and the hook
+     * was not already sent for this order.
+     *
+     * @param WC_Order $order
+     * @param string $source
+     * @param string $statusBefore Order status before this request changed it.
+     * @return void
+     */
+    public function payplusEnsurePaymentCompleteHook($order, $source, $statusBefore)
+    {
+        $order_id = $order->get_id();
+        $statusNow = $order->get_status();
+        $unpaid = apply_filters('woocommerce_valid_order_statuses_for_payment_complete', ['on-hold', 'pending', 'failed', 'cancelled'], $order);
+        if (!in_array($statusBefore, $unpaid, true) || in_array($statusNow, $unpaid, true)) {
+            return;
+        }
+        if (!$this->fire_completed) {
+            $this->payplusLogPaymentComplete($order_id, $source, "woocommerce_payment_complete: NOT SENT ('Payment Completed' setting is off) | status: $statusBefore => $statusNow");
+            return;
+        }
+        $order->read_meta_data(true);
+        if ($order->get_meta('_payplus_payment_complete_sent')) {
+            $this->payplusLogPaymentComplete($order_id, $source, "woocommerce_payment_complete: NOT SENT (already sent for this order) | status: $statusBefore => $statusNow");
+            return;
+        }
+        do_action('woocommerce_payment_complete', $order_id, $order->get_transaction_id()); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WooCommerce core hook
+        $this->payplusLogPaymentComplete($order_id, $source, "woocommerce_payment_complete: SENT (status was set directly) | status: $statusBefore => $statusNow");
+    }
+
+    /**
+     * Log a paid-status update that was skipped because another process already paid the order.
+     *
+     * @param WC_Order $order
+     * @param string $source
+     * @return void
+     */
+    protected function payplusLogPaymentCompleteSkipped($order, $source)
+    {
+        $this->payplusLogPaymentComplete($order->get_id(), $source, "skipped: order already '" . $order->get_status() . "' (another process marked it paid)");
+    }
+
+    /**
      * Apply paid/auth order status from callback/IPN.
      * Same transitions as before, plus WooCommerce guards so a second concurrent
      * path does not fire payment_complete()/status hooks again.
@@ -3752,9 +3845,10 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
      * @param int|string $order_id
      * @param string $type
      * @param object|null $res
+     * @param string $source Process name for the payment-complete log.
      * @return WC_Order|bool|null
      */
-    public function updateOrderStatus($order_id, $type, $res = null)
+    public function updateOrderStatus($order_id, $type, $res = null, $source = 'updateOrderStatus')
     {
         $order = wc_get_order($order_id);
         if (!$order) {
@@ -3763,6 +3857,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
         if ($this->updateStatusesIpn) {
             $this->payplus_add_log_all('payplus_callback_secured', "NOT UPDATING STATUS IN CALLBACK BECAUSE: updateStatusesIpn is true. \n");
+            $this->payplusLogPaymentComplete($order_id, $source, "skipped: 'Update statuses in ipn response' is on - the IPN check sets the status");
             return $order;
         }
 
@@ -3796,12 +3891,13 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     'payplus_callback_secured',
                     "$order_id - status update skipped (already paid / status={$order->get_status()})\n"
                 );
+                $this->payplusLogPaymentCompleteSkipped($order, $source);
                 return $order;
             }
 
             if (isset($res->data->recurring_type)) {
                 if ($this->recurring_order_set_to_paid == 'yes') {
-                    $order->payment_complete();
+                    $this->payplusPaymentComplete($order, "$source (recurring)");
                 }
                 $order->update_status('wc-recsubc');
                 $order->save();
@@ -3811,7 +3907,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             if ($type == "Charge") {
                 if ($this->fire_completed) {
                     // WC payment_complete() no-ops when status is no longer valid for it.
-                    $order->payment_complete();
+                    $this->payplusPaymentComplete($order, $source);
                     $this->payplus_add_log_all('payplus_callback_secured', "payplus_update_order_status_request_ipn->Update status to->firePaymentComplete\n");
                 }
                 $order = wc_get_order($order_id);
@@ -4008,8 +4104,16 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                         $order->add_order_note(sprintf(__('PayPlus IPN Failed<br/>Transaction UID: %s', 'payplus-payment-gateway'), $transaction_uid));
                         break;
                     } else {
+                        $resMoreInfo = isset($res->data->more_info) ? $res->data->more_info : '';
+                        if ($resMoreInfo !== '' && !WC_PayPlus_Statics::more_info_matches_order($resMoreInfo, $order_id)) {
+                            $this->payplus_add_log_all($handle, 'Order #' . $order_id . ' REJECTED: PayPlus transaction belongs to more_info ' . sanitize_text_field((string) $resMoreInfo) . ', not this order. Nothing changed.', 'error');
+                            $order->add_order_note(__('PayPlus: a payment check returned a transaction that belongs to a different order. The order was not changed.', 'payplus-payment-gateway'));
+                            $flagPayplus = false;
+                            $flagProcess = false;
+                            break;
+                        }
                         $inData = array_merge($data, (array) $res->data);
-                        if (empty($type) && !empty($res->data->type)) {
+                        if (!empty($res->data->type)) {
                             $type = $res->data->type;
                         }
                         if (property_exists($res->data, 'related_transactions')) {
@@ -4030,7 +4134,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                             }
                             $this->payplus_add_log_all('payplus_callback_secured', $order_id . " requestPayPlusIpn->updating statuses now: \n");
                             $this->payplus_add_log_all($handle, 'Order #' . $order_id . ' requestPayPlusIpn->updating statuses now');
-                            $returnStatus = $this->updateOrderStatus($order_id, $type, $res);
+                            $returnStatus = $this->updateOrderStatus($order_id, $type, $res, "requestPayPlusIpn via $handleLog ($handle)");
                             $this->logOrderBegin($order_id, __FUNCTION__ . ':end');
 
                             $this->payplus_add_log_all($handle, 'Order #' . $order_id . ' ' . wp_json_encode($res), 'completed');
@@ -4236,6 +4340,15 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     if ($alternative_method_name == 'valuecard' || $alternative_method_name == 'finitione') {
                         $insertMeta['payplus_four_digits_' . $alternative_method_name] = $relatedTransactionsOther->four_digits;
                     }
+                } elseif (
+                    $alternative_method_name == "wire-transfers"
+                    || (!empty($relatedTransactionsOther->alternative_method) && isset($relatedTransactionsOther->method) && $relatedTransactionsOther->method == "bank")
+                ) {
+                    if (!isset($tempArrrelatedTransactions['wire-transfers'])) {
+                        $tempArrrelatedTransactions['wire-transfers'] = floatval($relatedTransactionsOther->amount);
+                    } else {
+                        $tempArrrelatedTransactions['wire-transfers'] += floatval($relatedTransactionsOther->amount);
+                    }
                 } else {
                     $tempArrrelatedTransactions['credit-card'] = floatval($relatedTransactionsOther->amount);
                     $insertMeta['payplus_four_digits'] = $relatedTransactionsOther->four_digits;
@@ -4334,6 +4447,11 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                 $method = (isset($response['method'])) ? $response['method'] : 'credit-card';
                 if (!empty($response['alternative_method_name'])) {
                     if (
+                        $response['alternative_method_name'] == "wire-transfers"
+                        || (!empty($response['alternative_method']) && isset($response['method']) && $response['method'] == "bank")
+                    ) {
+                        $method = "wire-transfers";
+                    } elseif (
                         $response['alternative_method_name'] == "bit"
                         || $response['alternative_method_name'] == "multipass" ||
                         $response['alternative_method_name'] == "paypal" ||
@@ -4379,53 +4497,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             $insertMeta['payplus_refunded'] = $order->get_total();
             $insertMeta['payplus_response'] = wp_json_encode($response, true);
 
-            // Update WooCommerce payment method if it differs from what was actually used
-            // Only for single payment methods (not multiple/split payments)
-            if (empty($response['related_transactions']) && isset($method)) {
-                $current_payment_method = $order->get_payment_method();
-
-                // Determine the actual payment method used
-                // Priority: alternative_method_name > method
-                $actual_method = $method; // Default to 'method' field (e.g., 'credit-card')
-
-                // If alternative_method_name exists, use it (e.g., 'google-pay', 'apple-pay', 'bit', etc.)
-                if (!empty($response['alternative_method_name'])) {
-                    $actual_method = $response['alternative_method_name'];
-                }
-
-                $payplus_method_map = [
-                    'credit-card' => 'payplus-payment-gateway',
-                    'bit' => 'payplus-payment-gateway-bit',
-                    'multipass' => 'payplus-payment-gateway-multipass',
-                    'paypal' => 'payplus-payment-gateway-paypal',
-                    'tav-zahav' => 'payplus-payment-gateway-tavzahav',
-                    'valuecard' => 'payplus-payment-gateway-valuecard',
-                    'google-pay' => 'payplus-payment-gateway-googlepay',
-                    'apple-pay' => 'payplus-payment-gateway-applepay',
-                ];
-
-                // Get the payment method ID that should be used based on actual payment method
-                $expected_payment_method = isset($payplus_method_map[$actual_method]) ? $payplus_method_map[$actual_method] : 'payplus-payment-gateway';
-
-                // If the current payment method doesn't match what was actually used, update it
-                // Set on object but do NOT save yet — meta must be stored first to avoid
-                // hooks (e.g. automatic invoice creation) running before payment data exists.
-                if ($current_payment_method !== $expected_payment_method) {
-                    $order->set_payment_method($expected_payment_method);
-                    $order->set_payment_method_title($this->get_payment_method_title($expected_payment_method));
-
-                    $old_title = $this->get_payment_method_title($current_payment_method);
-                    $new_title = $this->get_payment_method_title($expected_payment_method);
-                    $order->add_order_note(
-                        sprintf(
-                            // Translators: %1$s is the old payment method title, %2$s is the new payment method title, %3$s is the actual payment method identifier.
-                            __('Payment method updated from %1$s to %2$s based on actual payment method used (%3$s)', 'payplus-payment-gateway'),
-                            $old_title,
-                            $new_title,
-                            $actual_method
-                        )
-                    );
-                }
+            if (isset($method)) {
+                $this->payplus_sync_order_payment_method($order, $response, $method);
             }
 
             // Store all meta first (update_meta already saves). A second $order->save()
@@ -4439,6 +4512,72 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             }
         } finally {
             WC_PayPlus_Meta_Data::release_single_write($writeKey);
+        }
+    }
+
+    /**
+     * Update the WooCommerce payment method if it differs from what was actually used.
+     * Only for single payment methods (not multiple/split payments).
+     * Sets on the object but does NOT save — the caller's meta update saves it, so hooks
+     * (e.g. automatic invoice creation) do not run before payment data exists.
+     *
+     * @param WC_Order $order
+     * @param array $response
+     * @param string $method
+     * @return void
+     */
+    public function payplus_sync_order_payment_method($order, $response, $method)
+    {
+        if (!$order || !empty($response['related_transactions'])) {
+            return;
+        }
+        $current_payment_method = $order->get_payment_method();
+
+        // Priority: alternative_method_name > method
+        $actual_method = $method;
+        if (!empty($response['alternative_method_name'])) {
+            $actual_method = $response['alternative_method_name'];
+        }
+
+        $payplus_method_map = [
+            'credit-card' => 'payplus-payment-gateway',
+            'bit' => 'payplus-payment-gateway-bit',
+            'multipass' => 'payplus-payment-gateway-multipass',
+            'paypal' => 'payplus-payment-gateway-paypal',
+            'tav-zahav' => 'payplus-payment-gateway-tavzahav',
+            'valuecard' => 'payplus-payment-gateway-valuecard',
+            'google-pay' => 'payplus-payment-gateway-googlepay',
+            'apple-pay' => 'payplus-payment-gateway-applepay',
+            'wire-transfers' => 'payplus-payment-gateway-wire-transfers',
+        ];
+
+        $expected_payment_method = isset($payplus_method_map[$actual_method]) ? $payplus_method_map[$actual_method] : 'payplus-payment-gateway';
+        $expected_title = $this->get_payment_method_title($expected_payment_method);
+
+        // Same gateway ID but the title of another PayPlus gateway (checkout re-submitted with a different method).
+        $staleTitle = false;
+        if ($current_payment_method === $expected_payment_method) {
+            foreach ($payplus_method_map as $gatewayId) {
+                if ($gatewayId !== $expected_payment_method && $order->get_payment_method_title() === $this->get_payment_method_title($gatewayId)) {
+                    $staleTitle = true;
+                    break;
+                }
+            }
+        }
+
+        if ($current_payment_method !== $expected_payment_method || $staleTitle) {
+            $old_title = $order->get_payment_method_title() ?: $this->get_payment_method_title($current_payment_method);
+            $order->set_payment_method($expected_payment_method);
+            $order->set_payment_method_title($expected_title);
+            $order->add_order_note(
+                sprintf(
+                    // Translators: %1$s is the old payment method title, %2$s is the new payment method title, %3$s is the actual payment method identifier.
+                    __('Payment method updated from %1$s to %2$s based on actual payment method used (%3$s)', 'payplus-payment-gateway'),
+                    $old_title,
+                    $expected_title,
+                    $actual_method
+                )
+            );
         }
     }
 
@@ -4722,7 +4861,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     WC_PayPlus_Meta_Data::update_meta($order, $insertMeta);
                     delete_post_meta($order->get_id(), 'payplus_error_sub');
                     if ($this->recurring_order_set_to_paid === "yes") {
-                        $order->payment_complete();
+                        $this->payplusPaymentComplete($order, 'scheduled subscription payment');
                         $order->update_status('completed');
                     } else if ($this->successful_order_status !== 'default-woo') {
                         $order->update_status($this->successful_order_status);

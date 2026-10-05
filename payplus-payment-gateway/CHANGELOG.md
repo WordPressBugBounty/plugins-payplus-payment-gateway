@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [8.2.9]  - 10-05-2026 - (Man)
+
+- Security  - Fixed critical payment bypass: a forged request to the payment return URL (`?wc-api=payplus_gateway`) could move an unpaid pending order to Processing (emails, stock, integrations) without payment. `ipn_response()` now exits after `payplus_redirect_graceful()` (non-browser requests no longer fall through), and `validateOrder()` no longer sets any status from return-URL fields - the status is set only after PayPlus confirms the transaction server-side (IPN). (Reported by VF Israel / VFC security scan)
+- Security  - The return URL is checked only against a payment page created for that order (`page_request_uid` history), and an IPN result whose `more_info` belongs to a different order is rejected - a paid transaction of one order can no longer be replayed to mark another order paid.
+- Security  - `payplusIpn()` accepts `payment_request_uid`, `transaction_uid`, `create_invoice` and `get_invoice` from the request only for users who can edit orders (admin buttons); customer-facing calls (payment page POST return) use the order's stored data.
+
+- Fix       - `woocommerce_payment_complete` is now sent on every PayPlus success path when "Payment Completed" is on. The return URL (`validateOrder`), non-cron `payplusIpn()` (POST return, double-check, IPN mode), Hosted Fields completion and saved-card checkout set the successful status directly and never sent the hook, so orders where the customer returned before the callback (callback note present) were missing it. Status changes and emails are unchanged; the hook is sent once per order (`_payplus_payment_complete_sent`).
+- Tweak     - New `payplus_payment_complete` log: every order records which process sent `woocommerce_payment_complete`, or why it was not sent / skipped.
+- Feature   - Payment page "POST" return mode (redirect, iframe, popup): the POST body is read and the order is confirmed with PayPlus (IPN) and redirected to the thank-you page, same as GET.
+- Fix       - Order payment method now updates to the method actually used on the payment page (e.g. opened as bit, paid by credit card), on both the callback and IPN paths.
+- Fix       - Invoice+: wire / bank transfer payments are documented as bank transfer with the account number in the description; the PayPlus order metabox shows "Account" instead of "Last Digits" for bank transfers.
+- Fix       - Invoice+: PayPal orders (PayPal Payments / PayPal Checkout) are no longer blocked by the PayPlus Authorization setting, and the "do not create" list matches them as PayPal.
+
 ## [8.2.8]  - 09-23-2026 - (Bomber)
 
 - Fix       - Invoice+: the payment callback (`payplusIpn`) no longer creates a document when Invoice Creation Mode is Manual. `payplus_invoice_create_order()` now refuses every automatic caller in Manual mode. The admin create-document action still issues the document.
