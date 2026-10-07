@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [8.3.0]  - 10-07-2026 - (Woman)
+
+- Tweak     - Improved order locking between the return URL and the PayPlus callback: payment complete, order data and payment method sync now run once per order, with or without "Prevent duplicate payment complete".
+- Tweak     - Shorter "Payment method changed from ... to ..." order note, and more details in the `payplus_payment_complete` log.
+- Tweak     - Error code `error-codes-terminal-type-6-code-4` translated: "Declined - the transaction was not approved" (Hebrew: סירוב העסקה לא אושרה).
+
 ## [8.2.9]  - 10-05-2026 - (Man)
 
 - Security  - Fixed critical payment bypass: a forged request to the payment return URL (`?wc-api=payplus_gateway`) could move an unpaid pending order to Processing (emails, stock, integrations) without payment. `ipn_response()` now exits after `payplus_redirect_graceful()` (non-browser requests no longer fall through), and `validateOrder()` no longer sets any status from return-URL fields - the status is set only after PayPlus confirms the transaction server-side (IPN). (Reported by VF Israel / VFC security scan)
