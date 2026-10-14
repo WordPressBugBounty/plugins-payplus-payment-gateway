@@ -1641,6 +1641,10 @@ msgstr "סירוב העסקה לא אושרה"
 msgid "Payment method changed from %1$s to %2$s"
 msgstr "אמצעי התשלום שונה מ־%1$s ל־%2$s"
 
+#: includes/wc_payplus_invoice.php
+msgid "Invoice+ document not created: the payment method is PayPlus but no PayPlus payment was recorded for this order. Change the payment method to the one actually used, or charge the order via PayPlus."
+msgstr "מסמך Invoice+ לא הופק: אמצעי התשלום בהזמנה הוא PayPlus אך לא נרשם עבורה תשלום ב-PayPlus. יש לשנות את אמצעי התשלום לאמצעי שבו שולם בפועל, או לחייב את ההזמנה דרך PayPlus."
+
 #: includes/class-wc-payplus-error-handler.php:22
 msgid "Card holder name"
 msgstr "שם בעל הכרטיס"
@@ -4632,6 +4636,37 @@ msgstr "הסתרת אפל פיי כאפשרות נפרדת בקופה"
 
 msgid "Prevent duplicate payment complete (Default: Unchecked)"
 msgstr "מניעת השלמת תשלום כפולה (ברירת מחדל: כבוי)"
+
+#. Translators: %d is the order number.
+msgid "Invoice+ document was not created for order #%d."
+msgstr "מסמך Invoice+ לא הופק עבור הזמנה מספר %d."
+
+msgid "The payment method on this order is PayPlus, but no PayPlus payment was recorded for it."
+msgstr "אמצעי התשלום בהזמנה הוא PayPlus, אך לא נרשם עבורה תשלום ב-PayPlus."
+
+msgid "To fix it: in the order Billing section, change \"Payment method\" to \"Other\" (or to \"N/A\" - no payment method), click \"Update\", and create the document again."
+msgstr "לתיקון: באזור החיוב (Billing) של ההזמנה, יש לשנות את \"אמצעי תשלום\" ל\"אחר\" (או ל\"N/A\" - ללא אמצעי תשלום), ללחוץ \"עדכון\" ולהפיק את המסמך שוב."
+
+msgid "If it is still not created, create the document manually from the Invoice+ (PayPlus) box and add the payment there."
+msgstr "אם המסמך עדיין לא מופק, יש להפיק אותו ידנית מתיבת Invoice+ (PayPlus) ולהוסיף בה את התשלום."
+
+msgid "Skip repeated payment checks"
+msgstr "דילוג על בדיקות תשלום חוזרות"
+
+msgid "Skip repeated payment checks (Default: Checked on new installs)"
+msgstr "דילוג על בדיקות תשלום חוזרות (ברירת מחדל: מסומן בהתקנות חדשות)"
+
+msgid "When the return page already verified and saved the payment, the PayPlus callback for the same transaction does not check it with PayPlus again, and Invoice+ is not called again for an order that already has a document. Fewer API calls, same order result."
+msgstr "כאשר דף החזרה כבר אימת ושמר את התשלום, הקולבק של PayPlus עבור אותה עסקה לא בודק אותה מול PayPlus שוב, ו-Invoice+ לא נקרא שוב עבור הזמנה שכבר יש לה מסמך. פחות קריאות API, אותה תוצאה בהזמנה."
+
+msgid "Prevent duplicate payment records"
+msgstr "מניעת רישומי תשלום כפולים"
+
+msgid "Prevent duplicate payment records (Default: Checked on new installs)"
+msgstr "מניעת רישומי תשלום כפולים (ברירת מחדל: מסומן בהתקנות חדשות)"
+
+msgid "When the return page and the PayPlus callback arrive together, the \"PayPlus ... Successful\" order note, the PayPlus payment row (used for Invoice+ documents) and the saved card token are created only once."
+msgstr "כאשר דף החזרה והקולבק של PayPlus מגיעים יחד, הערת ההזמנה \"PayPlus ... Successful\", רשומת התשלום של PayPlus (המשמשת למסמכי Invoice+) והטוקן השמור של הכרטיס נוצרים פעם אחת בלבד."
 
 msgid "Block unpaid $0 orders from session desync"
 msgstr "חסימת הזמנות ללא תשלום בסכום 0 עקב חוסר סנכרון בסשן"

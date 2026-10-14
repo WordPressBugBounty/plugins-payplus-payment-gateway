@@ -4,7 +4,7 @@ Tags: Woocommerce Payment Gateway, Credit Cards, Charges and Refunds, Subscripti
 Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 8.3.0
+Stable tag: 8.3.1
 PlugIn URL: https://www.payplus.co.il/wordpress
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
@@ -85,6 +85,14 @@ If you get stuck, you can ask for help in the Plugin Forum. or contact us direct
 8. Save your settings, now you have an active payment page!
 
 == Changelog ==
+
+== 8.3.1  - 14-10-2026 =
+
+- Tweak     - New advanced option "Prevent duplicate payment records" (on for new installs, off for existing stores) - success note, payment row and saved token are created once.
+- Tweak     - New advanced option "Skip repeated payment checks" (on for new installs, off for existing stores) - fewer PayPlus and Invoice+ calls.
+- Tweak     - Invoice+: reason logged when a document is not created, with an order note and popup for a PayPlus method without PayPlus payment.
+- Tweak     - Subscription support shown only for the main PayPlus, Embedded, Google Pay and Apple Pay gateways.
+- Fix       - Blocks checkout shows PayPlus and Embedded for subscription carts when "Accept manual renewals" is off.
 
 == 8.3.0  - 07-10-2026 =
 

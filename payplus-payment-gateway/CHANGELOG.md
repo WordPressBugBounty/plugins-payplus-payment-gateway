@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [8.3.1]  - 14-11-2026 - (Animals)
+
+- Tweak     - New advanced option "Prevent duplicate payment records" (on for new installs, off for existing stores): the "PayPlus ... Successful" note, the PayPlus payment row and the saved card token are created once per order.
+- Tweak     - New advanced option "Skip repeated payment checks" (on for new installs, off for existing stores): fewer PayPlus and Invoice+ calls when the return page already verified the payment, logged in `payplus_skip_repeated_checks`.
+- Tweak     - Invoice+: when a document is not created, the reason is logged in `payplus_process_invoice`; an order note and an order page popup explain how to fix a PayPlus payment method without a PayPlus payment.
+- Tweak     - Subscription support is shown only for the main PayPlus, Embedded, Google Pay and Apple Pay gateways.
+- Fix       - Blocks checkout: PayPlus and Embedded show for subscription carts when WooCommerce Subscriptions "Accept manual renewals" is off (as in classic checkout).
+
 ## [8.3.0]  - 10-07-2026 - (Woman)
 
 - Tweak     - Improved order locking between the return URL and the PayPlus callback: payment complete, order data and payment method sync now run once per order, with or without "Prevent duplicate payment complete".

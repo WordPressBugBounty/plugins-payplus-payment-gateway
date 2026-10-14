@@ -75,6 +75,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
     public $logging;
     public $fire_completed;
     public $preventDuplicatePaymentComplete;
+    public $preventDuplicateSideEffects;
+    public $skipRepeatedPaymentChecks;
     public $invoice_lang;
     public $response_url;
     public $payplus_generate_key_dashboard;
@@ -231,6 +233,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         $this->logging = wc_get_logger();
         $this->fire_completed = $this->get_option('fire_completed') == 'yes' ? true : false;
         $this->preventDuplicatePaymentComplete = $this->get_option('prevent_duplicate_payment_complete') === 'yes';
+        $this->preventDuplicateSideEffects = $this->get_option('prevent_duplicate_side_effects', 'yes') === 'yes';
+        $this->skipRepeatedPaymentChecks = $this->get_option('skip_repeated_payment_checks', 'yes') === 'yes';
         $this->invoice_lang = $this->get_option('invoice_lang') == 'en' ? 'en' : '';
 
         //wc-api=payplus_gateway added to the response url will initiate the woocommerce_api_payplus_gateway action - which will start the ipn_response
@@ -3379,7 +3383,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
         if (!$json) {
             $json = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_callback_response');
         }
-        $payPlusResponse = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_response');
+        $payPlusResponse = WC_PayPlus_Meta_Data::get_meta($this->skipRepeatedPaymentChecks ? $this->getFreshOrder($order_id) : $order_id, 'payplus_response');
         $response = json_decode($json, true);
         $indexRow = 0;
         $tblname = $wpdb->prefix . 'payplus_payment_process';
@@ -3403,6 +3407,16 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
 
             $transactionUid = sanitize_text_field($response['transaction']['uid']);
             $status_code = sanitize_text_field($response['transaction']['status_code']);
+
+            if ($this->skipRepeatedPaymentChecks) {
+                $this->payplusLogSkipRepeatedChecks(
+                    $order_id,
+                    'callback',
+                    "first PayPlus check (payplusIpn) - payment data in database: " . (empty($payPlusResponse) ? 'none' : 'saved')
+                        . " | callback transaction: $transactionUid, status_code: $status_code => "
+                        . (empty($payPlusResponse) ? ($status_code === '000' ? 'checking with PayPlus' : 'not needed (status_code is not 000)') : 'skipped (already saved by another process)')
+                );
+            }
 
             if (empty($payPlusResponse)) {
                 if ($status_code === "000") {
@@ -3476,9 +3490,34 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                     $payload['related_transaction'] = true;
                     $payload = wp_json_encode($payload);
                     $this->payplus_add_log_all($handle, wp_json_encode($payload), 'payload');
-                    $this->requestPayPlusIpn($payload, $inData, 1, $handle);
+                    $alreadyProcessed = false;
+                    if ($this->skipRepeatedPaymentChecks && $transaction_uid !== '') {
+                        $savedOrder = $this->getFreshOrder($order_id);
+                        $savedProcessed = $savedOrder && !empty($savedOrder->get_meta('payplus_print_log', true));
+                        $savedTransactionUid = $savedOrder ? (string) $savedOrder->get_meta('payplus_transaction_uid', true) : '';
+                        $alreadyProcessed = $savedProcessed && $savedTransactionUid === $transaction_uid;
+                        $this->payplusLogSkipRepeatedChecks(
+                            $order_id,
+                            'callback',
+                            'second PayPlus check (requestPayPlusIpn) - order in database: status ' . ($savedOrder ? $savedOrder->get_status() : '-')
+                                . ', fully processed: ' . ($savedProcessed ? 'yes' : 'no')
+                                . ", saved transaction: " . ($savedTransactionUid !== '' ? $savedTransactionUid : '-')
+                                . " | callback transaction: $transaction_uid => "
+                                . ($alreadyProcessed ? 'skipped (same transaction already verified and processed)' : ($savedProcessed ? 'checking with PayPlus (different transaction)' : 'checking with PayPlus (not processed yet)'))
+                        );
+                    } elseif ($this->skipRepeatedPaymentChecks) {
+                        $this->payplusLogSkipRepeatedChecks($order_id, 'callback', 'second PayPlus check - callback has no transaction uid => checking with PayPlus');
+                    }
+                    if (!$alreadyProcessed) {
+                        $this->requestPayPlusIpn($payload, $inData, 1, $handle);
+                    }
+                } elseif ($this->skipRepeatedPaymentChecks) {
+                    $this->payplusLogSkipRepeatedChecks($order_id, 'callback', "second PayPlus check not needed - order status is '{$order->get_status()}' (not pending/failed), same as before this option");
                 }
             } else {
+                if ($this->skipRepeatedPaymentChecks) {
+                    $this->payplusLogSkipRepeatedChecks($order_id, 'callback', "second PayPlus check not needed - repeat callback for status_code $status_code (count " . (intval($result->count_process) + 1) . '), same as before this option');
+                }
                 $countProcess = intval($result->count_process);
                 $rowId = intval($result->rowId);
                 $wpdb->update(
@@ -3728,7 +3767,7 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
      * @param int|string $order_id
      * @return WC_Order|false
      */
-    protected function getFreshOrder($order_id)
+    public function getFreshOrder($order_id)
     {
         $order_id = (int) $order_id;
         clean_post_cache($order_id);
@@ -3780,6 +3819,23 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
             'payplus_payment_complete',
             "Order #$order_id | process: $source | request: " . $this->payplusRequestContext() . " | $result"
         );
+    }
+
+    /**
+     * "Skip repeated payment checks" decisions: written to the log of the flow they belong to
+     * and to payplus_skip_repeated_checks, which collects all of them in one place.
+     *
+     * @param int $order_id
+     * @param string $source
+     * @param string $result
+     * @param string $flowHandle
+     * @return void
+     */
+    public function payplusLogSkipRepeatedChecks($order_id, $source, $result, $flowHandle = 'payplus_payment_complete')
+    {
+        $line = "Order #$order_id | process: $source | request: " . $this->payplusRequestContext() . " | skip repeated checks: $result";
+        $this->payplus_add_log_all($flowHandle, $line);
+        $this->payplus_add_log_all('payplus_skip_repeated_checks', "[$flowHandle] $line");
     }
 
     /**
@@ -4152,10 +4208,19 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                             $insertMeta['payplus_related_transactions'] = 1;
                             WC_PayPlus_Meta_Data::update_meta($order, $insertMeta);
                         }
-                        $rowOrder = $this->invoice_api->payplus_get_payments($order_id);
+                        $paymentRowLocked = $this->preventDuplicateSideEffects && $this->acquireOrderStatusLock($order_id);
+                        try {
+                            $rowOrder = $this->invoice_api->payplus_get_payments($order_id);
 
-                        if (!count($rowOrder)) {
-                            $this->payplus_add_order($order_id, $inData);
+                            if (!count($rowOrder)) {
+                                $this->payplus_add_order($order_id, $inData);
+                            } elseif ($this->preventDuplicateSideEffects) {
+                                $this->payplusLogPaymentComplete($order_id, "payment row ($handleLog)", 'skipped: PayPlus payment row already saved');
+                            }
+                        } finally {
+                            if ($paymentRowLocked) {
+                                $this->releaseOrderStatusLock($order_id);
+                            }
                         }
                         $this->payplus_add_log_all($handle, 'Order #' . $order_id . ' status:' . $res->data->status_code);
                         if ($this->isApprovedStatusCode($res->data->status_code)) {
@@ -4184,6 +4249,8 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                                     $insertMeta['payplus_transaction_type'] = "1";
                                 }
                             }
+                            $sideEffectsLocked = $this->preventDuplicateSideEffects && $this->acquireOrderStatusLock($order_id);
+                            try {
                             if ($this->create_pp_token && $token_uid && $userID && $createToken) {
                                 $this->save_token($data, $userID);
                             }
@@ -4191,7 +4258,16 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                                 update_user_meta($userID, 'cc_token', $data['token_uid']);
                             }
 
-                            if (empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_print_log', true))) {
+                            if ($this->preventDuplicateSideEffects) {
+                                $order->read_meta_data(true);
+                                $successNoteDone = $order->get_meta('payplus_print_log', true);
+                                if (!empty($successNoteDone)) {
+                                    $this->payplusLogPaymentComplete($order_id, "success note ($handleLog)", 'skipped: "PayPlus ... Successful" note already added by another process');
+                                }
+                            } else {
+                                $successNoteDone = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_print_log', true);
+                            }
+                            if (empty($successNoteDone)) {
                                 WC_PayPlus_Meta_Data::update_meta($order, array('payplus_print_log' => 1));
                                 if (property_exists($res->data, 'related_transactions')) {
 
@@ -4309,6 +4385,11 @@ class WC_PayPlus_Gateway extends WC_Payment_Gateway_CC
                                             ));
                                         }
                                     }
+                                }
+                            }
+                            } finally {
+                                if ($sideEffectsLocked) {
+                                    $this->releaseOrderStatusLock($order_id);
                                 }
                             }
 

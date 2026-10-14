@@ -1275,6 +1275,7 @@ class PayplusInvoice
         $order = wc_get_order($order_id);
         $typePaymentMethod = $order->get_payment_method();
         if (isset($this->payplus_invoice_option['do-not-create']) && in_array($typePaymentMethod, $this->payplus_invoice_option['do-not-create'])) {
+            $this->get_main_payplus_gateway()->payplus_add_log_all('payplus_process_invoice', "Order {$order_id}: automatic document skipped - payment method '{$typePaymentMethod}' is in \"do not create\"");
             return;
         }
         if ($typePaymentMethod == "bacs" || $typePaymentMethod == "cod") {
@@ -1312,6 +1313,7 @@ class PayplusInvoice
         // Manual mode: only the admin "create document" action may issue a document.
         // Callback, IPN, status hooks, and cron must not.
         if ($this->payplus_get_create_invoice_manual() && !$allowWhenManual) {
+            $this->get_main_payplus_gateway()->payplus_add_log_all('payplus_process_invoice', "Order {$order_id}: document not created - Invoice Creation Mode is Manual (only the admin create button issues documents)");
             return;
         }
 
@@ -1321,18 +1323,39 @@ class PayplusInvoice
         $invoiceLockName = 'payplus_inv_' . (int) $order_id;
         $invoiceLocked = WC_PayPlus_Meta_Data::claim_single_write($invoiceLockName);
         if (!$invoiceLocked) {
+            $WC_PayPlus_Gateway->payplus_add_log_all($handle, "Order {$order_id}: document not created - another document request for this order is running (or one stopped less than 30s ago)");
             return;
         }
 
-        $checkInvoiceSend = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_check_invoice_send', true);
-        $payplusErrorInvoice = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_error_invoice', true);
+        $documentSource = $order_id;
+        if ($WC_PayPlus_Gateway && !empty($WC_PayPlus_Gateway->skipRepeatedPaymentChecks)) {
+            $documentSource = $WC_PayPlus_Gateway->getFreshOrder($order_id) ?: $order_id;
+        }
+        $checkInvoiceSend = WC_PayPlus_Meta_Data::get_meta($documentSource, 'payplus_check_invoice_send', true);
+        $payplusErrorInvoice = WC_PayPlus_Meta_Data::get_meta($documentSource, 'payplus_error_invoice', true);
         $payplusTransactionUid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_transaction_uid', true);
-        $payplusInvoiceDocUid = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_invoice_docUID', true);
+        $payplusInvoiceDocUid = WC_PayPlus_Meta_Data::get_meta($documentSource, 'payplus_invoice_docUID', true);
+        if ($documentSource !== $order_id) {
+            $WC_PayPlus_Gateway->payplusLogSkipRepeatedChecks(
+                $order_id,
+                'Invoice+',
+                'document check read from database - payplus_check_invoice_send: ' . ($checkInvoiceSend ? 'yes' : 'no')
+                    . ', payplus_invoice_docUID: ' . ($payplusInvoiceDocUid ? sanitize_text_field((string) $payplusInvoiceDocUid) : '-')
+                    . ' => ' . ($this->payplus_invoice_already_created($checkInvoiceSend, $payplusInvoiceDocUid, $payplusErrorInvoice) ? 'skipped (document already exists, Invoice+ not called)' : 'continuing to create the document'),
+                $handle
+            );
+        }
         $j5Amount = WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_charged_j5_amount', true);
         $invoice_manual = $this->payplus_get_create_invoice_manual();
 
         $order = wc_get_order($order_id);
         if ($this->payplus_invoice_already_created($checkInvoiceSend, $payplusInvoiceDocUid, $payplusErrorInvoice)) {
+            $WC_PayPlus_Gateway->payplus_add_log_all(
+                $handle,
+                "Order {$order_id}: document not created - order already has a document (payplus_check_invoice_send: " . ($checkInvoiceSend ? 'yes' : 'no')
+                    . ', payplus_invoice_docUID: ' . ($payplusInvoiceDocUid ? sanitize_text_field((string) $payplusInvoiceDocUid) : '-')
+                    . ', unique-identifier-exists error: ' . (!empty($payplusErrorInvoice) ? 'yes' : 'no') . ')'
+            );
             WC_PayPlus_Meta_Data::release_single_write($invoiceLockName);
             return;
         }
@@ -1352,6 +1375,15 @@ class PayplusInvoice
                 || !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_alternative_method_name', true))
                 || !empty(WC_PayPlus_Meta_Data::get_meta($order_id, 'payplus_method', true));
             if ($generic_payplus && !$has_payplus_payment_data && !$isCashPayment) {
+                $WC_PayPlus_Gateway->payplus_add_log_all($handle, "Order {$order_id}: document not created - payment method is '{$wc_method}' but the order has no PayPlus payment data yet (payplus_response / payplus_method empty); waiting for the PayPlus callback / IPN");
+                if ($order && !$order->get_meta('_payplus_invoice_no_payment_data_noted')) {
+                    $order->add_order_note(__('Invoice+ document not created: the payment method is PayPlus but no PayPlus payment was recorded for this order. Change the payment method to the one actually used, or charge the order via PayPlus.', 'payplus-payment-gateway'));
+                    $order->update_meta_data('_payplus_invoice_no_payment_data_noted', time());
+                    $order->save_meta_data();
+                }
+                if (is_admin() && current_user_can('edit_shop_orders')) {
+                    set_transient('payplus_invoice_no_data_popup_' . get_current_user_id(), (int) $order_id, 5 * MINUTE_IN_SECONDS);
+                }
                 return;
             }
 
@@ -1369,6 +1401,7 @@ class PayplusInvoice
 
                 if (in_array($effectiveMethod, $doNotCreate, true)) {
                     $order->add_order_note('This payment method is set as: Not to create documents automatically');
+                    $WC_PayPlus_Gateway->payplus_add_log_all($handle, "Order {$order_id}: document not created - payment method '{$effectiveMethod}' is in \"do not create\"");
                     return;
                 }
             }
@@ -1376,8 +1409,15 @@ class PayplusInvoice
             if (isset($this->payplus_invoice_option['zero_total_dont_create']) && $this->payplus_invoice_option['zero_total_dont_create'] == "yes") {
                 if (floatval($order->get_total()) === 0.0) {
                     $order->add_order_note(__('Invoice not created: Order total is zero and "Do not create documents for zero-total orders" is enabled.', 'payplus-payment-gateway'));
+                    $WC_PayPlus_Gateway->payplus_add_log_all($handle, "Order {$order_id}: document not created - order total is zero and \"do not create for zero-total orders\" is on");
                     return;
                 }
+            }
+
+            if ($payplusErrorInvoice === "unique-identifier-exists") {
+                $WC_PayPlus_Gateway->payplus_add_log_all($handle, "Order {$order_id}: document not created - Invoice+ already reported unique-identifier-exists for this order");
+            } elseif ($checkInvoiceSend || !$this->payplus_get_invoice_enable()) {
+                $WC_PayPlus_Gateway->payplus_add_log_all($handle, "Order {$order_id}: document not created - " . ($checkInvoiceSend ? 'documents already sent for this order' : 'Invoice+ is disabled'));
             }
 
             if ($payplusErrorInvoice !== "unique-identifier-exists") {
@@ -1578,6 +1618,7 @@ class PayplusInvoice
                                     isset($this->payplus_invoice_option['do-not-create']) && in_array($order->get_payment_method(), $this->payplus_invoice_option['do-not-create'])
                                 ) {
                                     $order->add_order_note('This payment method is set as: Not to create documents automatically');
+                                    $WC_PayPlus_Gateway->payplus_add_log_all($handle, "Order {$order_id}: document not created - payment method '{$method_payment}' is in \"do not create\"");
                                     return;
                                 }
                                 $objectInvoicePaymentNoPayplus = array('method_payment' => $method_payment, 'price' => ($dual * $totalCartAmount) * 100);
@@ -1686,6 +1727,8 @@ class PayplusInvoice
                             $WC_PayPlus_Gateway->payplus_add_log_all($handle, 'Doing post:  (' . $order_id . ')');
                             $response = WC_PayPlus_Statics::payPlusRemote($this->url_payplus_create_invoice . $payplus_document_type, $payload);
                             $WC_PayPlus_Gateway->payplus_add_log_all($handle, 'Response: ' . wp_json_encode($response));
+                        } else {
+                            $WC_PayPlus_Gateway->payplus_add_log_all($handle, "Order {$order_id}: document not sent to Invoice+ - called as a cash payment (bank transfer / cash on delivery automatic path)");
                         }
 
                         if (is_wp_error($response)) {
@@ -1734,6 +1777,8 @@ class PayplusInvoice
                                 }
                             }
                         }
+                    } else {
+                        $WC_PayPlus_Gateway->payplus_add_log_all($handle, "Order {$order_id}: document not created - PayPlus transaction type is Authorization (J5) and the order was not charged yet (payplus_type: '" . sanitize_text_field((string) $payplusType) . "')");
                     }
                 }
             }
