@@ -4,8 +4,7 @@
  * Plugin Name: PayPlus Payment Gateway
  * Description: Accept credit/debit card payments or other methods such as bit, Apple Pay, Google Pay in one page. Create digitally signed invoices & much more.
  * Plugin URI: https://www.payplus.co.il/wordpress
- * Version: 8.3.1
- * Tested up to: 7.1
+ * Version: 8.3.2
  * Requires Plugins: woocommerce
  * Requires at least: 6.2
  * Requires PHP: 7.4
@@ -19,8 +18,8 @@ defined('ABSPATH') or die('Hey, You can\'t access this file!'); // Exit if acces
 define('PAYPLUS_PLUGIN_URL', plugins_url('/', __FILE__));
 define('PAYPLUS_PLUGIN_URL_ASSETS_IMAGES', PAYPLUS_PLUGIN_URL . "assets/images/");
 define('PAYPLUS_PLUGIN_DIR', dirname(__FILE__));
-define('PAYPLUS_VERSION', '8.3.1');
-define('PAYPLUS_VERSION_DB', 'payplus_8_3_1');
+define('PAYPLUS_VERSION', '8.3.2');
+define('PAYPLUS_VERSION_DB', 'payplus_8_3_2');
 define('PAYPLUS_TABLE_PROCESS', 'payplus_payment_process');
 class WC_PayPlus
 {
